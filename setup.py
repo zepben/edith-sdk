@@ -23,6 +23,7 @@ test_deps = [
     "pytest-cov==2.10.1",
     "pytest-asyncio==0.19.0",
     "pytest-timeout==1.4.2",
+    "grpcio-testing==1.46.3",
     "pylint==2.14.5"
 ]
 
