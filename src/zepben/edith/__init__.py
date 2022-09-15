@@ -17,10 +17,12 @@ def distribution_transformer_proportional_allocator_creator(proportion: int, edi
     """
     Creates an allocator for the synthetic feeder creator that distributes a `proportion` of NMIs from `edith_customers` to an `LvFeeder`
 
-    :param proportion: The percentage of Edith customers to distribute to an `LvFeeder`
+    :param proportion: The percentage of Edith customers to distribute to an `LvFeeder`. Must be between 1 and 100
     :param edith_customers: The Edith NMIs to distribute to the `LvFeeder`
     :return: A function that takes an `LvFeeder` and distributes the `proportion` of NMIs across the EnergyConsumers on the `LvFeeder`.
     """
+    if not 1 < proportion <= 100:
+        raise ValueError("Proportion must be between 1 and 100")
 
     def allocator(lv_feeder: LvFeeder):
         # Note - given the same LvFeeder and proportion, this function should produce the same result.
@@ -32,7 +34,7 @@ def distribution_transformer_proportional_allocator_creator(proportion: int, edi
     return allocator
 
 
-async def _create_synthetic_feeder(feeder_mrid: str, allocator: Callable[[LvFeeder], None] = do_nothing_allocator) -> NetworkService:
+async def _create_synthetic_feeder(self, feeder_mrid: str, allocator: Callable[[LvFeeder], None] = do_nothing_allocator) -> NetworkService:
     """
     Creates a copy of the given `feeder_mrid` and runs `allocator` across the `LvFeeders` that belong to the `Feeder`.
 
@@ -40,17 +42,17 @@ async def _create_synthetic_feeder(feeder_mrid: str, allocator: Callable[[LvFeed
     :param allocator: The allocator to use to modify the LvFeeders. Default will do nothing to the feeder.
     :return: The synthetic version of the NetworkService
     """
-    # Todo: fetch the feeder from EWB
+    # TODO: fetch the feeder from EWB
     # loop over the LvFeeders and call allocator on it
     # return the service
-    pass
 
+    return NetworkService()
 
 NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 
 
-def _sync_create_synthetic_feeder(feeder_mrid: str, allocator: Callable[[LvFeeder], None] = do_nothing_allocator) -> NetworkService:
-    return get_event_loop().run_until_complete(_create_synthetic_feeder(feeder_mrid, allocator))
+def _sync_create_synthetic_feeder(self, feeder_mrid: str, allocator: Callable[[LvFeeder], None] = do_nothing_allocator) -> NetworkService:
+    return get_event_loop().run_until_complete(self._create_synthetic_feeder(feeder_mrid, allocator))
 
 
 SyncNetworkConsumerClient.create_synthetic_feeder = _sync_create_synthetic_feeder
