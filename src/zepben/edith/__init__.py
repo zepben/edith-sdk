@@ -39,7 +39,7 @@ def distribution_transformer_proportional_allocator_creator(
 
         for up in random.sample(usage_points, int(len(usage_points) * 1/proportion)):
             # noinspection PyArgumentList
-            up.add_name(Name(name=next(nmi_generator), type=nmi_name_type))
+            up.add_name(nmi_name_type.get_or_add_name(next(nmi_generator), up))
 
     return allocator
 
