@@ -47,7 +47,8 @@ def distribution_transformer_proportional_allocator_creator(
 async def _create_synthetic_feeder(
         self: SyncNetworkConsumerClient,
         feeder_mrid: str,
-        allocator: Callable[[LvFeeder, NameType], None] = do_nothing_allocator
+        allocator: Callable[[LvFeeder, NameType], None] = do_nothing_allocator,
+        seed: Optional[int] = None
 ) -> NetworkService:
     """
     Creates a copy of the given `feeder_mrid` and runs `allocator` across the `LvFeeders` that belong to the `Feeder`.
@@ -56,9 +57,6 @@ async def _create_synthetic_feeder(
     :param allocator: The allocator to use to modify the LvFeeders. Default will do nothing to the feeder.
     :return: The synthetic version of the NetworkService
     """
-    # TODO: fetch the feeder from EWB
-    # loop over the LvFeeders and call allocator on it
-    # return the service
 
     self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
     feeder_network = self.service
@@ -68,6 +66,9 @@ async def _create_synthetic_feeder(
         # noinspection PyArgumentList
         nmi_name_type = NameType(name="NMI")
         feeder_network.add_name_type(nmi_name_type)
+
+    if seed:
+        random.seed(seed)
     for lv_feeder in feeder_network.objects(LvFeeder):
         allocator(lv_feeder, nmi_name_type)
 
@@ -79,9 +80,10 @@ NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 def _sync_create_synthetic_feeder(
         self: SyncNetworkConsumerClient,
         feeder_mrid: str,
-        allocator: Callable[[LvFeeder, NameType], None] = do_nothing_allocator
+        allocator: Callable[[LvFeeder, NameType], None] = do_nothing_allocator,
+        seed: Optional[int] = None
 ) -> NetworkService:
-    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, allocator))
+    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, allocator, seed))
 
 
 SyncNetworkConsumerClient.create_synthetic_feeder = _sync_create_synthetic_feeder
