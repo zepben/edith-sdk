@@ -3,38 +3,52 @@
 #  This Source Code Form is subject to the terms of the Mozilla Public
 #  License, v. 2.0. If a copy of the MPL was not distributed with this
 #  file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
+import itertools
+import random
 from asyncio import get_event_loop
-from typing import List
 from zepben.evolve import *
+from zepben.protobuf.nc.nc_requests_pb2 import INCLUDE_ENERGIZED_LV_FEEDERS
 
 
-def do_nothing_allocator(_):
+def do_nothing_allocator(_1, _2):
     pass
 
 
-def distribution_transformer_proportional_allocator_creator(proportion: int, edith_customers: List[str]) -> Callable[[LvFeeder], None]:
+def distribution_transformer_proportional_allocator_creator(
+        proportion: int,
+        edith_customers: List[str]
+) -> Callable[[LvFeeder], None]:
     """
-    Creates an allocator for the synthetic feeder creator that distributes a `proportion` of NMIs from `edith_customers` to an `LvFeeder`
+    Creates an allocator for the synthetic feeder creator that distributes a `proportion` of NMIs from `edith_customers`
+    to an `LvFeeder`
 
     :param proportion: The percentage of Edith customers to distribute to an `LvFeeder`. Must be between 1 and 100
     :param edith_customers: The Edith NMIs to distribute to the `LvFeeder`
-    :return: A function that takes an `LvFeeder` and distributes the `proportion` of NMIs across the EnergyConsumers on the `LvFeeder`.
+    :return: A function that takes an `LvFeeder` and distributes the `proportion` of NMIs across the UsagePoints on the
+    `LvFeeder`.
     """
-    if not 1 < proportion <= 100:
+    if not 1 <= proportion <= 100:
         raise ValueError("Proportion must be between 1 and 100")
 
-    def allocator(lv_feeder: LvFeeder):
-        # Note - given the same LvFeeder and proportion, this function should produce the same result.
-        # if we can assume that the equipment on the LvFeeder is always in the same order, this can
-        # be something simple where you just modify every X EnergyConsumer on the feeder or something (say where X is derived from the number
-        # of EnergyConsumers on the feeder)
-        pass
+    nmi_generator = itertools.cycle(edith_customers)
+
+    def allocator(lv_feeder: LvFeeder, nmi_name_type: NameType):
+        usage_points = set()
+        for eq in lv_feeder.equipment:
+            usage_points.update(eq.usage_points)
+
+        for up in random.sample(usage_points, int(len(usage_points) * 1/proportion)):
+            # noinspection PyArgumentList
+            up.add_name(Name(name=next(nmi_generator), type=nmi_name_type))
 
     return allocator
 
 
-async def _create_synthetic_feeder(self, feeder_mrid: str, allocator: Callable[[LvFeeder], None] = do_nothing_allocator) -> NetworkService:
+async def _create_synthetic_feeder(
+        self: SyncNetworkConsumerClient,
+        feeder_mrid: str,
+        allocator: Callable[[LvFeeder, NameType], None] = do_nothing_allocator
+) -> NetworkService:
     """
     Creates a copy of the given `feeder_mrid` and runs `allocator` across the `LvFeeders` that belong to the `Feeder`.
 
@@ -46,13 +60,28 @@ async def _create_synthetic_feeder(self, feeder_mrid: str, allocator: Callable[[
     # loop over the LvFeeders and call allocator on it
     # return the service
 
-    return NetworkService()
+    self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
+    feeder_network = self.service
+    try:
+        nmi_name_type = feeder_network.get_name_type("NMI")
+    except KeyError:
+        # noinspection PyArgumentList
+        nmi_name_type = NameType(name="NMI")
+        feeder_network.add_name_type(nmi_name_type)
+    for lv_feeder in feeder_network.objects(LvFeeder):
+        allocator(lv_feeder, nmi_name_type)
+
+    return feeder_network
 
 NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 
 
-def _sync_create_synthetic_feeder(self, feeder_mrid: str, allocator: Callable[[LvFeeder], None] = do_nothing_allocator) -> NetworkService:
-    return get_event_loop().run_until_complete(self._create_synthetic_feeder(feeder_mrid, allocator))
+def _sync_create_synthetic_feeder(
+        self: SyncNetworkConsumerClient,
+        feeder_mrid: str,
+        allocator: Callable[[LvFeeder, NameType], None] = do_nothing_allocator
+) -> NetworkService:
+    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, allocator))
 
 
 SyncNetworkConsumerClient.create_synthetic_feeder = _sync_create_synthetic_feeder
