@@ -33,11 +33,13 @@ def distribution_transformer_proportional_allocator_creator(
     nmi_generator = itertools.cycle(edith_customers)
 
     def allocator(lv_feeder: LvFeeder, nmi_name_type: NameType):
-        usage_points = set()
+        usage_points = []
         for eq in lv_feeder.equipment:
-            usage_points.update(eq.usage_points)
+            usage_points.extend(eq.usage_points)
 
-        for up in random.sample(usage_points, int(len(usage_points) * 1/proportion)):
+        usage_points.sort(key=lambda up: up.mrid)
+
+        for up in random.sample(usage_points, int(len(usage_points) * proportion/100)):
             # noinspection PyArgumentList
             up.add_name(nmi_name_type.get_or_add_name(next(nmi_generator), up))
 
@@ -45,7 +47,7 @@ def distribution_transformer_proportional_allocator_creator(
 
 
 async def _create_synthetic_feeder(
-        self: SyncNetworkConsumerClient,
+        self: NetworkConsumerClient,
         feeder_mrid: str,
         allocator: Callable[[LvFeeder, NameType], None] = do_nothing_allocator,
         seed: Optional[int] = None
@@ -58,7 +60,7 @@ async def _create_synthetic_feeder(
     :return: The synthetic version of the NetworkService
     """
 
-    self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
+    await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
     feeder_network = self.service
     try:
         nmi_name_type = feeder_network.get_name_type("NMI")
@@ -69,7 +71,8 @@ async def _create_synthetic_feeder(
 
     if seed:
         random.seed(seed)
-    for lv_feeder in feeder_network.objects(LvFeeder):
+
+    for lv_feeder in sorted(feeder_network.objects(LvFeeder), key=lambda lvf: lvf.mrid):
         allocator(lv_feeder, nmi_name_type)
 
     return feeder_network
