@@ -60,7 +60,7 @@ async def _create_synthetic_feeder(
 
     :param feeder_mrid: The mRID of the feeder to create a synthetic version.
     :param allocator: The allocator to use to modify the LvFeeders. Default will do nothing to the feeder.
-    :return: 2-tuple of (the synthetic version of the NetworkService, the number of modified identified objects)
+    :return: 2-tuple of (the synthetic version of the NetworkService, the number of added identified objects)
     """
 
     await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)

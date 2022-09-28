@@ -23,7 +23,7 @@ Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, s
     
 The `usage_point_proportional_allocator` function creates an allocator that distributes NMI names across a percentage
 of usage points. It will use up all provided names before reusing any. In other words, it will not reuse a name unless
-the number of modifications (`num_allocations`) is greater than the length of `edith_customers`.
+the number of allocations (`num_allocations`) is greater than the length of `edith_customers`.
 
 Example: A synthetic feeder is created on a feeder with 5 usage points: UP1, UP2, UP3, UP4, and UP5. The allocator is
 a `usage_point_proportional_allocator(proportion=60, edith_customers=["A", "B", "C"])`. One possible result of the
