@@ -10,24 +10,27 @@ import pytest
 
 import grpc_testing
 from zepben.evolve import NetworkService, IdentifiedObject, CableInfo, AcLineSegment, Breaker, EnergySource, \
-    EnergySourcePhase, Junction, PowerTransformer, PowerTransformerEnd, ConnectivityNode, Feeder, Location, OverheadWireInfo, PerLengthSequenceImpedance, \
+    EnergySourcePhase, Junction, PowerTransformer, PowerTransformerEnd, ConnectivityNode, Feeder, Location, \
+    OverheadWireInfo, PerLengthSequenceImpedance, \
     Substation, Terminal, EquipmentContainer, TransformerStarImpedance, GeographicalRegion, \
     SubGeographicalRegion, Circuit, Loop, LvFeeder, UsagePoint, BaseVoltage
 from zepben.protobuf.nc import nc_pb2
 from zepben.protobuf.nc.nc_data_pb2 import NetworkIdentifiedObject
 from zepben.protobuf.nc.nc_requests_pb2 import GetIdentifiedObjectsRequest, GetEquipmentForContainersRequest
-from zepben.protobuf.nc.nc_responses_pb2 import GetIdentifiedObjectsResponse, GetEquipmentForContainersResponse, GetNetworkHierarchyResponse
+from zepben.protobuf.nc.nc_responses_pb2 import GetIdentifiedObjectsResponse, GetEquipmentForContainersResponse, \
+    GetNetworkHierarchyResponse
 
 from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator
 from test.streaming.get.grpcio_aio_testing.mock_async_channel import async_testing_channel
-from test.streaming.get.mock_server import MockServer, StreamGrpc, UnaryGrpc, stream_from_fixed, unary_from_fixed
+from test.streaming.get.mock_server import MockServer, StreamGrpc, UnaryGrpc, unary_from_fixed
 
 
 class TestNetworkConsumer:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        self.channel = async_testing_channel(nc_pb2.DESCRIPTOR.services_by_name.values(), grpc_testing.strict_real_time())
+        self.channel = async_testing_channel(nc_pb2.DESCRIPTOR.services_by_name.values(),
+                                             grpc_testing.strict_real_time())
         self.mock_server = MockServer(self.channel, nc_pb2.DESCRIPTOR.services_by_name['NetworkConsumer'])
         self.client = NetworkConsumerClient(channel=self.channel)
         self.service = self.client.service
@@ -36,8 +39,6 @@ class TestNetworkConsumer:
     @pytest.mark.parametrize("feeder_network", [5], indirect=True)
     async def test_create_synthetic_feeder(self, feeder_network: NetworkService):
         feeder_mrid = "f001"
-
-        # TODO: uncomment everything here after getting feeder is actually implemented otherwise it just hangs
 
         async def client_test():
             service, n = await self.client.create_synthetic_feeder(
@@ -52,12 +53,13 @@ class TestNetworkConsumer:
 
         object_responses = _create_object_responses(feeder_network)
 
-        await self.mock_server.validate(client_test,
-                                        [
-                                            UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(feeder_network))),
-                                            StreamGrpc('getEquipmentForContainers', [_create_container_responses(feeder_network)]),
-                                            StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
-                                        ])
+        await self.mock_server.validate(
+            client_test,
+            [
+                UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(feeder_network))),
+                StreamGrpc('getEquipmentForContainers', [_create_container_responses(feeder_network)]),
+                StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
+            ])
 
 
 # noinspection PyUnresolvedReferences
@@ -116,7 +118,7 @@ def _response_of(io: IdentifiedObject, response_type):
 
 
 def _create_object_responses(ns: NetworkService, mrids: Optional[Iterable[str]] = None) \
-    -> Callable[[GetIdentifiedObjectsRequest], Generator[GetIdentifiedObjectsResponse, None, None]]:
+        -> Callable[[GetIdentifiedObjectsRequest], Generator[GetIdentifiedObjectsResponse, None, None]]:
     valid: Dict[str, IdentifiedObject] = {mrid: ns[mrid] for mrid in mrids} if mrids else ns
 
     def responses(request: GetIdentifiedObjectsRequest) -> Generator[GetIdentifiedObjectsResponse, None, None]:
@@ -143,10 +145,11 @@ def _create_hierarchy_response(service: NetworkService) -> GetNetworkHierarchyRe
 
 
 def _create_container_responses(ns: NetworkService, mrids: Optional[Iterable[str]] = None) \
-    -> Callable[[GetEquipmentForContainersRequest], Generator[GetEquipmentForContainersResponse, None, None]]:
+        -> Callable[[GetEquipmentForContainersRequest], Generator[GetEquipmentForContainersResponse, None, None]]:
     valid: Dict[str, EquipmentContainer] = {mrid: ns[mrid] for mrid in mrids} if mrids else ns
 
-    def responses(request: GetEquipmentForContainersRequest) -> Generator[GetEquipmentForContainersResponse, None, None]:
+    def responses(request: GetEquipmentForContainersRequest) -> \
+            Generator[GetEquipmentForContainersResponse, None, None]:
         for mrid in request.mrids:
             container = valid[mrid]
             if container:

@@ -40,9 +40,9 @@ def usage_point_proportional_allocator(
 
         usage_points_to_name = random.sample(usage_points, int(len(usage_points) * proportion / 100))
 
-        for up in usage_points_to_name:
+        for usage_point in usage_points_to_name:
             # noinspection PyArgumentList
-            up.add_name(nmi_name_type.get_or_add_name(next(nmi_generator), up))
+            usage_point.add_name(nmi_name_type.get_or_add_name(next(nmi_generator), usage_point))
 
         return len(usage_points_to_name)
 
