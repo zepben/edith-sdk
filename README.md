@@ -7,7 +7,7 @@ and apply certain scenarios to them to modify the network.
 
 # Usage #
 
-Functionality is implemented on the NetworkConsumerClient from the evolve SDK, so to use simply do the following:
+Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, so to use simply do the following:
 
     from zepben.edith import NetworkConsumerClient, connect_with_password, distribution_transformer_proportional_allocator_creator
     
