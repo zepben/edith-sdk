@@ -4,20 +4,17 @@
 #  License, v. 2.0. If a copy of the MPL was not distributed with this
 #  file, You can obtain one at https://mozilla.org/MPL/2.0/.
 import itertools
-import logging
 import random
 from asyncio import get_event_loop
 from zepben.evolve import *
 from zepben.protobuf.nc.nc_requests_pb2 import INCLUDE_ENERGIZED_LV_FEEDERS
-
-logger = logging.getLogger("zepben.edith")
 
 
 def do_nothing_allocator(_1, _2):
     return 0
 
 
-def distribution_transformer_proportional_allocator_creator(
+def usage_point_proportional_allocator(
         proportion: int,
         edith_customers: List[str]
 ) -> Callable[[LvFeeder, NameType], int]:
@@ -34,22 +31,14 @@ def distribution_transformer_proportional_allocator_creator(
         raise ValueError("Proportion must be between 1 and 100")
 
     nmi_generator = itertools.cycle(edith_customers)
-    num_nmis_used = 0
 
     def allocator(lv_feeder: LvFeeder, nmi_name_type: NameType) -> int:
-        nonlocal num_nmis_used
-
         usage_points = []
         for eq in lv_feeder.equipment:
             usage_points.extend(eq.usage_points)
         usage_points.sort(key=lambda up: up.mrid)
 
         usage_points_to_name = random.sample(usage_points, int(len(usage_points) * proportion / 100))
-        if num_nmis_used <= len(edith_customers) < num_nmis_used + len(usage_points_to_name):
-            logger.warning(
-                "Insufficient NMIs to allocate to the requested percentage of usage points without repetition."
-            )
-        num_nmis_used += len(usage_points_to_name)
 
         for up in usage_points_to_name:
             # noinspection PyArgumentList
@@ -65,13 +54,13 @@ async def _create_synthetic_feeder(
         feeder_mrid: str,
         allocator: Callable[[LvFeeder, NameType], int] = do_nothing_allocator,
         seed: Optional[int] = None
-) -> NetworkService:
+) -> Tuple[NetworkService, int]:
     """
     Creates a copy of the given `feeder_mrid` and runs `allocator` across the `LvFeeders` that belong to the `Feeder`.
 
     :param feeder_mrid: The mRID of the feeder to create a synthetic version.
     :param allocator: The allocator to use to modify the LvFeeders. Default will do nothing to the feeder.
-    :return: The synthetic version of the NetworkService
+    :return: 2-tuple of (the synthetic version of the NetworkService, the number of modified identified objects)
     """
 
     await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
@@ -90,9 +79,7 @@ async def _create_synthetic_feeder(
     for lv_feeder in sorted(feeder_network.objects(LvFeeder), key=lambda lvf: lvf.mrid):
         total_allocated += allocator(lv_feeder, nmi_name_type)
 
-    logger.info(f"NMI names have been added to {total_allocated} usage points.")
-
-    return feeder_network
+    return feeder_network, total_allocated
 
 NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 
@@ -102,7 +89,7 @@ def _sync_create_synthetic_feeder(
         feeder_mrid: str,
         allocator: Callable[[LvFeeder, NameType], int] = do_nothing_allocator,
         seed: Optional[int] = None
-) -> NetworkService:
+) -> Tuple[NetworkService, int]:
     return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, allocator, seed))
 
 

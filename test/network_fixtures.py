@@ -6,6 +6,7 @@
 from typing import Dict, List, Optional
 
 from pytest import fixture
+from zepben.evolve import AssignToLvFeeders, LvFeeder, BaseVoltage
 
 from zepben.edith import NetworkService, Feeder, PhaseCode, EnergySource, EnergySourcePhase, Junction, ConductingEquipment, Breaker, PowerTransformer, \
     UsagePoint, Terminal, PowerTransformerEnd, Meter, AssetOwner, CustomerService, Organisation, AcLineSegment, \
@@ -286,23 +287,36 @@ def add_location(network: NetworkService, psr: PowerSystemResource, *coords: flo
 
 
 @fixture()
-async def feeder_network():
+async def feeder_network(request):
     """
                 c1       c2
     source-fcb------fsp------tx
     """
+    num_usagepoints = request.param
+
     network_service = NetworkService()
+
+    hv = BaseVoltage(mrid="hv")
+    hv.nominal_voltage = 22000
+    network_service.add(hv)
 
     source = create_source_for_connecting(network_service, "source", 1, PhaseCode.AB)
     fcb = create_switch_for_connecting(network_service, "fcb", 2, PhaseCode.AB)
     fsp = create_junction_for_connecting(network_service, "fsp", 2, PhaseCode.AB)
-    tx = create_power_transformer_for_connecting(network_service, "tx", 2, PhaseCode.AB, end_args=[{"rated_u": 22000}, {"rated_u": 415}])
+    tx = create_power_transformer_for_connecting(network_service, "tx", 2, PhaseCode.AB,
+                                                 num_usagepoints=num_usagepoints,
+                                                 end_args=[{"rated_u": 22000}, {"rated_u": 415}])
 
     c1 = create_acls_for_connecting(network_service, "c1", PhaseCode.AB)
     c2 = create_acls_for_connecting(network_service, "c2", PhaseCode.AB)
 
+    fcb.base_voltage = fsp.base_voltage = c1.base_voltage = c2.base_voltage = hv
+
     sub = create_substation(network_service, "f", "f")
-    create_feeder(network_service, "f001", "f001", sub, fsp.get_terminal_by_sn(2))
+    fdr = create_feeder(network_service, "f001", "f001", sub, fsp.get_terminal_by_sn(2))
+    lvf = LvFeeder(mrid="lvf001", normal_head_terminal=tx.get_terminal_by_sn(2), normal_energizing_feeders=[fdr])
+    fdr.add_normal_energized_lv_feeder(lvf)
+    network_service.add(lvf)
 
     add_location(network_service, source, 1.0, 1.0)
     add_location(network_service, fcb, 1.0, 1.0)
@@ -319,4 +333,5 @@ async def feeder_network():
 
     await SetPhases().run(network_service)
     await AssignToFeeders().run(network_service)
+    await AssignToLvFeeders().run(network_service)
     return network_service

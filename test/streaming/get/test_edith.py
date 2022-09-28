@@ -3,27 +3,24 @@
 #  This Source Code Form is subject to the terms of the Mozilla Public
 #  License, v. 2.0. If a copy of the MPL was not distributed with this
 #  file, You can obtain one at https://mozilla.org/MPL/2.0/.
-#
-#  This Source Code Form is subject to the terms of the Mozilla Public
-#  License, v. 2.0. If a copy of the MPL was not distributed with this
-#  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 from typing import Optional, Iterable, Generator, Callable, Dict
 
-import pytest as pytest
+import pytest
 
 import grpc_testing
 from zepben.evolve import NetworkService, IdentifiedObject, CableInfo, AcLineSegment, Breaker, EnergySource, \
     EnergySourcePhase, Junction, PowerTransformer, PowerTransformerEnd, ConnectivityNode, Feeder, Location, OverheadWireInfo, PerLengthSequenceImpedance, \
     Substation, Terminal, EquipmentContainer, TransformerStarImpedance, GeographicalRegion, \
-    SubGeographicalRegion, Circuit, Loop
+    SubGeographicalRegion, Circuit, Loop, LvFeeder, UsagePoint, BaseVoltage
 from zepben.protobuf.nc import nc_pb2
 from zepben.protobuf.nc.nc_data_pb2 import NetworkIdentifiedObject
 from zepben.protobuf.nc.nc_requests_pb2 import GetIdentifiedObjectsRequest, GetEquipmentForContainersRequest
 from zepben.protobuf.nc.nc_responses_pb2 import GetIdentifiedObjectsResponse, GetEquipmentForContainersResponse, GetNetworkHierarchyResponse
 
-from zepben.edith import NetworkConsumerClient
-from streaming.get.grpcio_aio_testing.mock_async_channel import async_testing_channel
-from streaming.get.mock_server import MockServer, StreamGrpc, UnaryGrpc, stream_from_fixed, unary_from_fixed
+from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator
+from test.streaming.get.grpcio_aio_testing.mock_async_channel import async_testing_channel
+from test.streaming.get.mock_server import MockServer, StreamGrpc, UnaryGrpc, stream_from_fixed, unary_from_fixed
 
 
 class TestNetworkConsumer:
@@ -36,25 +33,31 @@ class TestNetworkConsumer:
         self.service = self.client.service
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("feeder_network", [5], indirect=True)
     async def test_create_synthetic_feeder(self, feeder_network: NetworkService):
         feeder_mrid = "f001"
 
         # TODO: uncomment everything here after getting feeder is actually implemented otherwise it just hangs
 
         async def client_test():
-            # service = await self.client.create_synthetic_feeder(feeder_mrid)
+            service, n = await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                usage_point_proportional_allocator(60, ["A", "B", "C"])
+            )
+            assert n == 3
 
-            # TODO: compare service to self.service? and make sure synthetic things are present
-            pass
+            added_names = list(self.service.get_name_type("NMI").names)
+            assert set(n.name for n in added_names) == {"A", "B", "C"}
+            assert len(set(n.identified_object for n in added_names)) == 3
 
         object_responses = _create_object_responses(feeder_network)
 
-        # await self.mock_server.validate(client_test,
-        #                                 [
-        #                                     UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(feeder_network))),
-        #                                     StreamGrpc('getEquipmentForContainers', [_create_container_responses(feeder_network)]),
-        #                                     StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
-        #                                 ])
+        await self.mock_server.validate(client_test,
+                                        [
+                                            UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(feeder_network))),
+                                            StreamGrpc('getEquipmentForContainers', [_create_container_responses(feeder_network)]),
+                                            StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
+                                        ])
 
 
 # noinspection PyUnresolvedReferences
@@ -98,7 +101,11 @@ def _to_network_identified_object(obj) -> NetworkIdentifiedObject:
     elif isinstance(obj, Circuit):
         nio = NetworkIdentifiedObject(circuit=obj.to_pb())
     elif isinstance(obj, LvFeeder):
-        nio = NetworkIdentifiedObject(lvfeeder=obj.to_pb())
+        nio = NetworkIdentifiedObject(lvFeeder=obj.to_pb())
+    elif isinstance(obj, UsagePoint):
+        nio = NetworkIdentifiedObject(usagePoint=obj.to_pb())
+    elif isinstance(obj, BaseVoltage):
+        nio = NetworkIdentifiedObject(baseVoltage=obj.to_pb())
     else:
         raise Exception(f"Missing class in create response - you should implement it: {str(obj)}")
     return nio
