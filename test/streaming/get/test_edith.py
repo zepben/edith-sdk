@@ -37,13 +37,13 @@ class TestNetworkConsumer:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("feeder_network", [5], indirect=True)
-    async def test_create_synthetic_feeder(self, feeder_network: NetworkService):
+    async def test_create_synthetic_feeder_does_not_reuse_nmis_by_default(self, feeder_network: NetworkService):
         feeder_mrid = "f001"
 
         async def client_test():
             service, n = await self.client.create_synthetic_feeder(
                 feeder_mrid,
-                usage_point_proportional_allocator(60, ["A", "B", "C"])
+                usage_point_proportional_allocator(80, ["A", "B", "C"])
             )
             assert n == 3
 
@@ -58,6 +58,59 @@ class TestNetworkConsumer:
             [
                 UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(feeder_network))),
                 StreamGrpc('getEquipmentForContainers', [_create_container_responses(feeder_network)]),
+                StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
+            ])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("feeder_network", [5], indirect=True)
+    async def test_create_synthetic_feeder_can_reuse_nmis(self, feeder_network: NetworkService):
+        feeder_mrid = "f001"
+
+        async def client_test():
+            service, n = await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                usage_point_proportional_allocator(80, ["A", "B", "C"], allow_duplicate_customers=True)
+            )
+            assert n == 4
+
+            added_names = list(self.service.get_name_type("NMI").names)
+            assert set(n.name for n in added_names) == {"A", "B", "C"}
+            assert len(set(n.identified_object for n in added_names)) == 4
+
+        object_responses = _create_object_responses(feeder_network)
+
+        await self.mock_server.validate(
+            client_test,
+            [
+                UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(feeder_network))),
+                StreamGrpc('getEquipmentForContainers', [_create_container_responses(feeder_network)]),
+                StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
+            ])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("network_with_nmis", [5], indirect=True)
+    async def test_create_synthetic_feeder_replaces_existing_nmis(self, network_with_nmis: NetworkService):
+        feeder_mrid = "fdr2"
+
+        async def client_test():
+            service, n = await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                usage_point_proportional_allocator(60, ["A", "B", "C"])
+            )
+            assert n == 3
+
+            nmi_names = list(self.service.get_name_type("NMI").names)
+            assert len(nmi_names) == 5
+            assert {"A", "B", "C"} <= set(n.name for n in nmi_names)
+            assert len(set(n.identified_object for n in nmi_names)) == 5
+
+        object_responses = _create_object_responses(network_with_nmis)
+
+        await self.mock_server.validate(
+            client_test,
+            [
+                UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(network_with_nmis))),
+                StreamGrpc('getEquipmentForContainers', [_create_container_responses(network_with_nmis)]),
                 StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
             ])
 

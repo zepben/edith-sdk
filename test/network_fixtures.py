@@ -6,7 +6,7 @@
 from typing import Dict, List, Optional
 
 from pytest import fixture
-from zepben.evolve import AssignToLvFeeders, LvFeeder, BaseVoltage
+from zepben.evolve import AssignToLvFeeders, LvFeeder, BaseVoltage, NameType, TestNetworkBuilder
 
 from zepben.edith import NetworkService, Feeder, PhaseCode, EnergySource, EnergySourcePhase, Junction, ConductingEquipment, Breaker, PowerTransformer, \
     UsagePoint, Terminal, PowerTransformerEnd, Meter, AssetOwner, CustomerService, Organisation, AcLineSegment, \
@@ -18,7 +18,7 @@ from zepben.evolve.util import CopyableUUID
 __all__ = ["create_terminals", "create_junction_for_connecting", "create_source_for_connecting", "create_switch_for_connecting", "create_acls_for_connecting",
            "create_energy_consumer_for_connecting", "create_feeder", "create_substation", "create_power_transformer_for_connecting", "create_terminals",
            "create_geographical_region", "create_subgeographical_region", "create_asset_owner", "create_meter", "create_power_transformer_end",
-           "feeder_network", "create_connectivitynode_with_terminals", "create_terminal"]
+           "feeder_network", "network_with_nmis", "create_connectivitynode_with_terminals", "create_terminal"]
 
 
 def create_terminals(network: NetworkService, ce: ConductingEquipment, num_terms: int, phases: PhaseCode = PhaseCode.ABCN) -> List[Terminal]:
@@ -334,4 +334,46 @@ async def feeder_network(request):
     await SetPhases().run(network_service)
     await AssignToFeeders().run(network_service)
     await AssignToLvFeeders().run(network_service)
+    return network_service
+
+
+@fixture()
+async def network_with_nmis(request):
+    num_usagepoints = request.param
+
+    hv = BaseVoltage(mrid="hv")
+    hv.nominal_voltage = 22000
+    lv = BaseVoltage(mrid="lv")
+    lv.nominal_voltage = 415
+
+    network_service = await (
+        TestNetworkBuilder()
+        .from_breaker(action=lambda ce: setattr(ce, "base_voltage", hv))
+        .to_power_transformer(end_actions=[
+            lambda pte: setattr(pte, "base_voltage", hv),
+            lambda pte: setattr(pte, "base_voltage", lv)
+        ])
+        .add_feeder("b0")
+        .add_lv_feeder("tx1")
+        .build()
+    )
+    network_service.add(hv)
+    network_service.add(lv)
+    fdr = network_service.get("fdr2", Feeder)
+    lvf = network_service.get("lvf3", LvFeeder)
+    fdr.add_normal_energized_lv_feeder(lvf)
+    lvf.add_normal_energizing_feeder(fdr)
+
+    # noinspection PyArgumentList
+    nmi_name_type = NameType(name="NMI")
+    network_service.add_name_type(nmi_name_type)
+
+    tx = network_service.get("tx1", PowerTransformer)
+    for i in range(num_usagepoints):
+        usage_point = UsagePoint(mrid=f"up{i}")
+        usage_point.add_name(nmi_name_type.get_or_add_name(f"NMI{i}", usage_point))
+        tx.add_usage_point(usage_point)
+        usage_point.add_equipment(tx)
+        network_service.add(usage_point)
+
     return network_service

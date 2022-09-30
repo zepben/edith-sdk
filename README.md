@@ -13,7 +13,11 @@ Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, s
     
     channel = connect_with_password(client_id="some_client_id", username="test", password="secret", host="host", port=443)
     client = NetworkConsumerClient(channel)
-    allocator = usage_point_proportional_allocator(proportion=30, edith_customers=["9995435452"])
+    allocator = usage_point_proportional_allocator(
+        proportion=30,
+        edith_customers=["9995435452"],
+        allow_duplicate_customers=True  # exclude to prevent adding a customer to multiple usage points
+    )
     synthetic_feeder, num_allocations = client.create_synthetic_feeder(
         "some_feeder_mrid",
         allocator=allocator,
@@ -23,7 +27,9 @@ Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, s
     
 The `usage_point_proportional_allocator` function creates an allocator that distributes NMI names across a percentage
 of usage points. It will use up all provided names before reusing any. In other words, it will not reuse a name unless
-the number of allocations (`num_allocations`) is greater than the length of `edith_customers`.
+the number of allocations (`num_allocations`) is greater than the length of `edith_customers`. By default, it will stop
+allocating NMI names once it uses up all provided names, unless `allow_duplicate_customers` is set to `True`.
+This allocator also removes an existing NMI on each usage point it adds a NMI to, if there exists one.
 
 Example: A synthetic feeder is created on a feeder with 5 usage points: UP1, UP2, UP3, UP4, and UP5. The allocator is
 a `usage_point_proportional_allocator(proportion=60, edith_customers=["A", "B", "C"])`. One possible result of the

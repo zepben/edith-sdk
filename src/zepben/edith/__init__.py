@@ -16,7 +16,8 @@ def do_nothing_allocator(_1, _2):
 
 def usage_point_proportional_allocator(
         proportion: int,
-        edith_customers: List[str]
+        edith_customers: List[str],
+        allow_duplicate_customers: bool = False,
 ) -> Callable[[LvFeeder, NameType], int]:
     """
     Creates an allocator for the synthetic feeder creator that distributes a `proportion` of NMIs from `edith_customers`
@@ -24,13 +25,17 @@ def usage_point_proportional_allocator(
 
     :param proportion: The percentage of Edith customers to distribute to an `LvFeeder`. Must be between 1 and 100
     :param edith_customers: The Edith NMIs to distribute to the `LvFeeder`
+    :param allow_duplicate_customers: Reuse customers from the list to reach the proportion if necessary.
     :return: A function that takes an `LvFeeder` and distributes the `proportion` of NMIs across the UsagePoints on the
     `LvFeeder`.
     """
     if not 1 <= proportion <= 100:
         raise ValueError("Proportion must be between 1 and 100")
 
-    nmi_generator = itertools.cycle(edith_customers)
+    if allow_duplicate_customers:
+        nmi_generator = itertools.cycle(edith_customers)
+    else:
+        nmi_generator = iter(edith_customers)
 
     def allocator(lv_feeder: LvFeeder, nmi_name_type: NameType) -> int:
         usage_points = []
@@ -40,11 +45,23 @@ def usage_point_proportional_allocator(
 
         usage_points_to_name = random.sample(usage_points, int(len(usage_points) * proportion / 100))
 
+        usage_points_named = 0
         for usage_point in usage_points_to_name:
-            # noinspection PyArgumentList
-            usage_point.add_name(nmi_name_type.get_or_add_name(next(nmi_generator), usage_point))
+            try:
+                next_nmi = next(nmi_generator)
+            except StopIteration:
+                break
 
-        return len(usage_points_to_name)
+            for name in usage_point.names:
+                if name.type.name == "NMI":
+                    usage_point.remove_name(name)
+                    name.type.remove_name(name)
+                    break
+
+            usage_point.add_name(nmi_name_type.get_or_add_name(next_nmi, usage_point))
+            usage_points_named += 1
+
+        return usage_points_named
 
     return allocator
 
