@@ -10,15 +10,23 @@ from zepben.evolve import *
 from zepben.protobuf.nc.nc_requests_pb2 import INCLUDE_ENERGIZED_LV_FEEDERS
 
 
-def do_nothing_allocator(_1, _2):
+def do_nothing_allocator(_):
     return 0
+
+
+# def line_weakener(
+#         current_rating_reduction: int,
+#         use_weakest_when_necessary: bool = True
+# ) -> Callable[[NetworkService], int]:
+#     weakened_
 
 
 def usage_point_proportional_allocator(
         proportion: int,
         edith_customers: List[str],
         allow_duplicate_customers: bool = False,
-) -> Callable[[LvFeeder, NameType], int]:
+        seed: Optional[int] = None
+) -> Callable[[NetworkService], int]:
     """
     Creates an allocator for the synthetic feeder creator that distributes a `proportion` of NMIs from `edith_customers`
     to an `LvFeeder`
@@ -37,29 +45,40 @@ def usage_point_proportional_allocator(
     else:
         nmi_generator = iter(edith_customers)
 
-    def allocator(lv_feeder: LvFeeder, nmi_name_type: NameType) -> int:
-        usage_points = []
-        for eq in lv_feeder.equipment:
-            usage_points.extend(eq.usage_points)
-        usage_points.sort(key=lambda up: up.mrid)
-
-        usage_points_to_name = random.sample(usage_points, int(len(usage_points) * proportion / 100))
+    def allocator(feeder_network: NetworkService) -> int:
+        random.seed(seed)
+        try:
+            nmi_name_type = feeder_network.get_name_type("NMI")
+        except KeyError:
+            # noinspection PyArgumentList
+            nmi_name_type = NameType(name="NMI")
+            feeder_network.add_name_type(nmi_name_type)
 
         usage_points_named = 0
-        for usage_point in usage_points_to_name:
-            try:
-                next_nmi = next(nmi_generator)
-            except StopIteration:
-                break
+        for lv_feeder in feeder_network.objects(LvFeeder):
+            usage_points = []
+            for eq in lv_feeder.equipment:
+                usage_points.extend(eq.usage_points)
+            usage_points.sort(key=lambda up: up.mrid)
 
-            for name in usage_point.names:
-                if name.type.name == "NMI":
-                    usage_point.remove_name(name)
-                    name.type.remove_name(name)
+            usage_points_to_name = random.sample(usage_points, int(len(usage_points) * proportion / 100))
+            for usage_point in usage_points_to_name:
+                try:
+                    next_nmi = next(nmi_generator)
+                except StopIteration:
                     break
 
-            usage_point.add_name(nmi_name_type.get_or_add_name(next_nmi, usage_point))
-            usage_points_named += 1
+                for name in usage_point.names:
+                    if name.type.name == "NMI":
+                        usage_point.remove_name(name)
+                        name.type.remove_name(name)
+                        break
+
+                usage_point.add_name(nmi_name_type.get_or_add_name(next_nmi, usage_point))
+                usage_points_named += 1
+            else:
+                continue
+            break
 
         return usage_points_named
 
@@ -69,8 +88,7 @@ def usage_point_proportional_allocator(
 async def _create_synthetic_feeder(
         self: NetworkConsumerClient,
         feeder_mrid: str,
-        allocator: Callable[[LvFeeder, NameType], int] = do_nothing_allocator,
-        seed: Optional[int] = None
+        allocator: Callable[[NetworkService], int] = do_nothing_allocator
 ) -> Tuple[NetworkService, int]:
     """
     Creates a copy of the given `feeder_mrid` and runs `allocator` across the `LvFeeders` that belong to the `Feeder`.
@@ -82,19 +100,8 @@ async def _create_synthetic_feeder(
 
     await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
     feeder_network = self.service
-    try:
-        nmi_name_type = feeder_network.get_name_type("NMI")
-    except KeyError:
-        # noinspection PyArgumentList
-        nmi_name_type = NameType(name="NMI")
-        feeder_network.add_name_type(nmi_name_type)
 
-    if seed:
-        random.seed(seed)
-
-    total_allocated = 0
-    for lv_feeder in sorted(feeder_network.objects(LvFeeder), key=lambda lvf: lvf.mrid):
-        total_allocated += allocator(lv_feeder, nmi_name_type)
+    total_allocated = allocator(feeder_network)
 
     return feeder_network, total_allocated
 
@@ -104,10 +111,9 @@ NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 def _sync_create_synthetic_feeder(
         self: SyncNetworkConsumerClient,
         feeder_mrid: str,
-        allocator: Callable[[LvFeeder, NameType], int] = do_nothing_allocator,
-        seed: Optional[int] = None
+        allocator: Callable[[NetworkService], int] = do_nothing_allocator
 ) -> Tuple[NetworkService, int]:
-    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, allocator, seed))
+    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, allocator))
 
 
 SyncNetworkConsumerClient.create_synthetic_feeder = _sync_create_synthetic_feeder

@@ -16,12 +16,12 @@ Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, s
     allocator = usage_point_proportional_allocator(
         proportion=30,
         edith_customers=["9995435452"],
-        allow_duplicate_customers=True  # exclude to prevent adding a customer to multiple usage points
+        allow_duplicate_customers=True,  # exclude to prevent adding a customer to multiple usage points
+        seed=1234  # exclude for non-deterministic allocation
     )
     synthetic_feeder, num_allocations = client.create_synthetic_feeder(
         "some_feeder_mrid",
-        allocator=allocator,
-        seed=1234  # exclude for non-deterministic allocation
+        allocator=allocator
     )
     # ... do stuff with synthetic feeder ...
     
