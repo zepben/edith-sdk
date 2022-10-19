@@ -9,16 +9,75 @@ from asyncio import get_event_loop
 from zepben.evolve import *
 from zepben.protobuf.nc.nc_requests_pb2 import INCLUDE_ENERGIZED_LV_FEEDERS
 
+from zepben.edith.linecode_catalogue import LINECODE_CATALOGUE
+
+__all__ = ["do_nothing_allocator", "line_weakener", "usage_point_proportional_allocator"]
+
 
 def do_nothing_allocator(_):
     return 0
 
 
-# def line_weakener(
-#         current_rating_reduction: int,
-#         use_weakest_when_necessary: bool = True
-# ) -> Callable[[NetworkService], int]:
-#     weakened_
+def line_weakener(
+        weakening_percentage: int,
+        use_weakest_when_necessary: bool = True
+) -> Callable[[NetworkService], int]:
+    if not 1 <= weakening_percentage <= 100:
+        raise ValueError("Weakening percentage must be between 1 and 100")
+    amp_rating_ratio = (100 - weakening_percentage) / 100
+
+    hv_linecodes = list(filter(lambda lc: lc.hv, LINECODE_CATALOGUE))
+    lv_linecodes = list(filter(lambda lc: not lc.hv, LINECODE_CATALOGUE))
+
+    def allocator(feeder_network: NetworkService):
+        # Add wire info and plsi for each linecode
+        for lc in LINECODE_CATALOGUE:
+            feeder_network.add(CableInfo(mrid=f"{lc.name} underground cable", rated_current=int(lc.norm_amps)))
+            feeder_network.add(OverheadWireInfo(mrid=f"{lc.name} overhead line", rated_current=int(lc.norm_amps)))
+            feeder_network.add(PerLengthSequenceImpedance(mrid=f"{lc.name} plsi", r0=lc.r0, x0=lc.x0, r=lc.r1, x=lc.x1))
+
+        num_lines_modified = 0
+        for acls in feeder_network.objects(AcLineSegment):
+            try:
+                terminal = acls.get_terminal_by_sn(1)
+            except IndexError:
+                print(f"{acls.mrid} is missing terminals")
+                continue
+
+            if acls.wire_info is None:
+                print(f"{acls.mrid} is missing wire info")
+                continue
+            wire_info: WireInfo = acls.wire_info
+
+            if acls.base_voltage_value > 1000:
+                correct_voltage_lcs = hv_linecodes
+            else:
+                correct_voltage_lcs = lv_linecodes
+
+            correct_phases_lcs = filter(lambda lc: lc.phases == terminal.phases.num_phases, correct_voltage_lcs)
+            viable_lcs = filter(
+                lambda lc: lc.norm_amps <= wire_info.rated_current * amp_rating_ratio,
+                correct_phases_lcs
+            )
+            if use_weakest_when_necessary:
+                fallback_lc = min(correct_phases_lcs, key=lambda lc: lc.norm_amps, default=None)
+            else:
+                fallback_lc = None
+            linecode = max(viable_lcs, key=lambda lc: lc.norm_amps, default=fallback_lc)
+            if linecode is None:
+                print(f"no viable linecode for {acls.mrid}")
+                continue
+
+            acls.per_length_sequence_impedance = feeder_network.get(f"{linecode.name} plsi", PerLengthSequenceImpedance)
+            if isinstance(acls.wire_info, CableInfo):
+                acls.wire_info = feeder_network.get(f"{linecode.name} underground cable", CableInfo)
+            else:
+                acls.wire_info = feeder_network.get(f"{linecode.name} overhead line", OverheadWireInfo)
+            num_lines_modified += 1
+
+        return num_lines_modified
+
+    return allocator
 
 
 def usage_point_proportional_allocator(
