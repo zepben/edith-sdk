@@ -52,7 +52,10 @@ def line_weakener(
             else:
                 correct_voltage_lcs = lv_linecodes
 
-            correct_phases_lcs = filter(lambda lc: lc.phases == min(terminal.phases.num_phases, 3), correct_voltage_lcs)
+            correct_phases_lcs = filter(
+                lambda lc: lc.phases == terminal.phases.without_neutral.num_phases,
+                correct_voltage_lcs
+            )
             viable_lcs = filter(
                 lambda lc: lc.norm_amps <= wire_info.rated_current * amp_rating_ratio,
                 correct_phases_lcs
