@@ -11,11 +11,23 @@ from zepben.protobuf.nc.nc_requests_pb2 import INCLUDE_ENERGIZED_LV_FEEDERS
 
 from zepben.edith.linecode_catalogue import LINECODE_CATALOGUE
 
-__all__ = ["do_nothing_allocator", "line_weakener", "usage_point_proportional_allocator"]
+__all__ = ["do_nothing_mutator", "composite_mutator", "line_weakener", "transformer_weakener",
+           "usage_point_proportional_allocator"]
+
+from zepben.edith.transformer_catalogue import TRANSFORMER_CATALOGUE
 
 
-def do_nothing_allocator(_):
+def do_nothing_mutator(_):
     return 0
+
+
+def composite_mutator(mutators: Iterable[Callable[[NetworkService], int]]) -> Callable[[NetworkService], int]:
+    def mutate(feeder_network):
+        total_changed = 0
+        for mut in mutators:
+            mut(feeder_network)
+        return total_changed
+    return mutate
 
 
 def line_weakener(
@@ -29,7 +41,7 @@ def line_weakener(
     hv_linecodes = list(filter(lambda lc: lc.hv, LINECODE_CATALOGUE))
     lv_linecodes = list(filter(lambda lc: not lc.hv, LINECODE_CATALOGUE))
 
-    def allocator(feeder_network: NetworkService):
+    def mutate(feeder_network: NetworkService):
         # Add wire info and plsi for each linecode
         for lc in LINECODE_CATALOGUE:
             feeder_network.add(CableInfo(mrid=f"{lc.name} underground cable", rated_current=int(lc.norm_amps)))
@@ -52,10 +64,10 @@ def line_weakener(
             else:
                 correct_voltage_lcs = lv_linecodes
 
-            correct_phases_lcs = filter(
+            correct_phases_lcs = list(filter(
                 lambda lc: lc.phases == terminal.phases.without_neutral.num_phases,
                 correct_voltage_lcs
-            )
+            ))
             viable_lcs = filter(
                 lambda lc: lc.norm_amps <= wire_info.rated_current * amp_rating_ratio,
                 correct_phases_lcs
@@ -77,7 +89,56 @@ def line_weakener(
 
         return num_lines_modified
 
-    return allocator
+    return mutate
+
+
+def transformer_weakener(
+        weakening_percentage: int,
+        use_weakest_when_necessary: bool = True,
+        match_voltages: bool = True
+) -> Callable[[NetworkService], int]:
+    if not 1 <= weakening_percentage <= 100:
+        raise ValueError("Weakening percentage must be between 1 and 100")
+    amp_rating_ratio = (100 - weakening_percentage) / 100
+
+    def mutate(feeder_network: NetworkService):
+        num_ends_modified = 0
+        for tx in feeder_network.objects(PowerTransformer):
+            ends = list(tx.ends)
+            if len(ends) == 0:
+                continue
+            for end in ends:
+                if end.rated_s is not None:
+                    target_rated_va = end.rated_s * amp_rating_ratio
+                    break
+            else:
+                continue
+
+            correct_num_windings = filter(lambda xfmr: xfmr.windings == len(ends), TRANSFORMER_CATALOGUE)
+            num_cores = ends[0].terminal.phases.without_neutral.num_phases
+            correct_cores_xfmrs = filter(lambda xfmr: xfmr.phases == num_cores, correct_num_windings)
+            if match_voltages:
+                end_voltages = list(map(lambda end: end.rated_u/1000, ends))
+                good_voltage_xfmrs = list(filter(lambda xfmr: xfmr.kvs == end_voltages, correct_cores_xfmrs))
+            else:
+                good_voltage_xfmrs = list(correct_cores_xfmrs)
+            viable_xfmrs = filter(lambda xfmr: max(xfmr.kvas) * 1000 <= target_rated_va, good_voltage_xfmrs)
+
+            if use_weakest_when_necessary:
+                fallback_xfmr = min(good_voltage_xfmrs, key=lambda xfmr: max(xfmr.kvas), default=None)
+            else:
+                fallback_xfmr = None
+            xfmr = max(viable_xfmrs, key=lambda xfmr: max(xfmr.kvas), default=fallback_xfmr)
+            if xfmr is None:
+                continue
+
+            for end, new_kva_rating in zip(ends, xfmr.kvas):
+                end.rated_s = new_kva_rating * 1000
+                num_ends_modified += 1
+
+        return num_ends_modified
+
+    return mutate
 
 
 def usage_point_proportional_allocator(
@@ -104,7 +165,7 @@ def usage_point_proportional_allocator(
     else:
         nmi_generator = iter(edith_customers)
 
-    def allocator(feeder_network: NetworkService) -> int:
+    def mutate(feeder_network: NetworkService) -> int:
         random.seed(seed)
         try:
             nmi_name_type = feeder_network.get_name_type("NMI")
@@ -141,28 +202,28 @@ def usage_point_proportional_allocator(
 
         return usage_points_named
 
-    return allocator
+    return mutate
 
 
 async def _create_synthetic_feeder(
         self: NetworkConsumerClient,
         feeder_mrid: str,
-        allocator: Callable[[NetworkService], int] = do_nothing_allocator
-) -> Tuple[NetworkService, int]:
+        mutator: Callable[[NetworkService], int] = do_nothing_mutator
+) -> int:
     """
     Creates a copy of the given `feeder_mrid` and runs `allocator` across the `LvFeeders` that belong to the `Feeder`.
 
     :param feeder_mrid: The mRID of the feeder to create a synthetic version.
-    :param allocator: The allocator to use to modify the LvFeeders. Default will do nothing to the feeder.
-    :return: 2-tuple of (the synthetic version of the NetworkService, the number of added identified objects)
+    :param mutator: The mutator to use to modify the feeder network. Default will do nothing to the feeder.
+    :return: The number of mutations performed on the feeder network.
     """
 
     await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
     feeder_network = self.service
 
-    total_allocated = allocator(feeder_network)
+    total_allocated = mutator(feeder_network)
 
-    return feeder_network, total_allocated
+    return total_allocated
 
 NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 
@@ -170,9 +231,9 @@ NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 def _sync_create_synthetic_feeder(
         self: SyncNetworkConsumerClient,
         feeder_mrid: str,
-        allocator: Callable[[NetworkService], int] = do_nothing_allocator
-) -> Tuple[NetworkService, int]:
-    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, allocator))
+        mutator: Callable[[NetworkService], int] = do_nothing_mutator
+) -> int:
+    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, mutator))
 
 
 SyncNetworkConsumerClient.create_synthetic_feeder = _sync_create_synthetic_feeder
