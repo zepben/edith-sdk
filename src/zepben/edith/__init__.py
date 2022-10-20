@@ -12,7 +12,7 @@ from zepben.protobuf.nc.nc_requests_pb2 import INCLUDE_ENERGIZED_LV_FEEDERS
 from zepben.edith.linecode_catalogue import LINECODE_CATALOGUE
 
 __all__ = ["do_nothing_mutator", "composite_mutator", "line_weakener", "transformer_weakener",
-           "usage_point_proportional_allocator"]
+           "usage_point_proportional_allocator", "NetworkConsumerClient", "SyncNetworkConsumerClient"]
 
 from zepben.edith.transformer_catalogue import TRANSFORMER_CATALOGUE
 
