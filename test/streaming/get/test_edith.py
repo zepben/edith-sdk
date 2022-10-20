@@ -41,7 +41,7 @@ class TestNetworkConsumer:
         feeder_mrid = "f001"
 
         async def client_test():
-            service, n = await self.client.create_synthetic_feeder(
+            n = await self.client.create_synthetic_feeder(
                 feeder_mrid,
                 usage_point_proportional_allocator(80, ["A", "B", "C"])
             )
@@ -67,7 +67,7 @@ class TestNetworkConsumer:
         feeder_mrid = "f001"
 
         async def client_test():
-            service, n = await self.client.create_synthetic_feeder(
+            n = await self.client.create_synthetic_feeder(
                 feeder_mrid,
                 usage_point_proportional_allocator(80, ["A", "B", "C"], allow_duplicate_customers=True)
             )
@@ -93,7 +93,7 @@ class TestNetworkConsumer:
         feeder_mrid = "fdr2"
 
         async def client_test():
-            service, n = await self.client.create_synthetic_feeder(
+            n = await self.client.create_synthetic_feeder(
                 feeder_mrid,
                 usage_point_proportional_allocator(60, ["A", "B", "C"])
             )
