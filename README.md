@@ -47,16 +47,39 @@ example is provided in the above "Usage" section.
 
 ## Line Weakener ##
 
+    from zepben.edith import line_weakener
+
     mutator = line_weakener(
         weakening_percentage=30,
         use_weakest_when_necessary=False  # exclude to use weakest line type when necessary
+        match 
     )
 
-The line weakener decreases the amp rating and modifies impedance on lines by selecting from a built-in catalogue of 
+The line weakener decreases the amp rating and modifies impedance of lines by selecting from a built-in catalogue of 
 linecodes. For each line, the applied linecode must match its phase count and whether its voltage category (HV or LV).
+
 Suppose a line has an amp rating of 300A. with a `weakening_percentage` of 30, the linecode used will have an amp rating
 of at most (100 - 30)% of 300A, i.e. 210A. Linecode "ABC4w:70ABC" would be used if the line is 3-phase LV, with an amp
 rating of 175A. Note that if there are multiple linecodes that fit the criteria, the one with the highest amp rating is
 used. If there are no linecodes that fit the criteria and `use_weakest_when_necessary` is `True`, then the
 lowest-amp-rating linecode that matches the phase and voltage criteria is used, if there is one. Otherwise, the line is
 left unmodified.
+
+## Transformer Weakener ##
+
+    from zepben.edith import transformer_weakener
+
+    mutator = transformer_weakener(
+        weakening_percentage=30,
+        use_weakest_when_necessary=False,  # exclude to use weakest transformer model when necessary
+        match_voltages=False,  # exclude to ensure transformer models match winding voltages
+    )
+
+The transformer weakener decreases the VA rating of power transformers by selecting from a built-in catalogue of
+transformer models. For each transformer, the applied model must match the number of windings (usually 2), the phase
+count, and the rated voltages (e.g. 11000 and 433). The last requirement is ignored if `match_voltages` is `False`.
+
+Suppose a transformer has a VA rating of 300kVA. With a weakening percentage of 30, the new VA rating should be at most
+(100 - 30)% of 300kVA, i.e. 210kVA. If the transformer is 3-phase and the winding voltages are 11kV and 433V,
+the "M_200KVA_11KV_433V_3PH_PADMOUNT_Tyree" transformer model may be used, decreasing the VA rating of the transformer
+to 200VA.
