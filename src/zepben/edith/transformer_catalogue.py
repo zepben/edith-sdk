@@ -14,11 +14,11 @@ class XfmrCode:
     name: str
     phases: int
     windings: int
-    kvas: [int]
-    kvs: [int]
+    kvas: List[int]
+    kvs: List[int]
     xhl: float
     load_loss: float
-    conns: [str]
+    conns: List[str]
     tap: float
 
 
