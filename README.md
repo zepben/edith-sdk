@@ -18,23 +18,24 @@ Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, s
         proportion=30,
         edith_customers=["9995435452"],
         allow_duplicate_customers=True,  # exclude to prevent adding a customer to multiple usage points
-        seed=1234  # exclude for non-deterministic allocation
+        seed=1234,  # exclude for non-deterministic allocation
+        callback=print  # prints set of usage points with added NMI names, after assigning NMIs
     )
-    modified_object_mrids = await client.create_synthetic_feeder(
+    await client.create_synthetic_feeder(
         "some_feeder_mrid",
-        mutator=mutator
+        mutators=[mutator],
     )
     synthetic_feeder = client.service
     # ... do stuff with synthetic feeder ...
 
 # Mutator Functions #
 
-The `create_synthetic_feeder` function fetches a feeder's network and applies a mutator function.
+The `create_synthetic_feeder` function fetches a feeder's network and applies a sequence of mutator functions.
     
     mutator = ...  # see subsections for options 
-    modified_object_mrids = await client.create_synthetic_feeder(
+    await client.create_synthetic_feeder(
         "some_feeder_mrid",
-        mutator=mutator
+        mutators=[mutator]
     )
 
 A mutator function takes a network and changes it in some way, for example increasing line impedances. Mutator functions
@@ -44,16 +45,17 @@ The Edith extension provides a few functions that create mutator functions:
 ## Usage Point Allocator ##
     
     from zepben.edith import usage_point_proportional_allocator
-
+    
     mutator = usage_point_proportional_allocator(
         proportion=30,
         edith_customers=["9995435452"],
         allow_duplicate_customers=True,  # exclude to prevent adding a customer to multiple usage points
         seed=1234  # exclude for non-deterministic allocation
+        callback=print  # function to call on set of mrids of named usage points (Set[str] -> Any)
     )
-    modified_usage_point_mrids = await client.create_synthetic_feeder(
+    await client.create_synthetic_feeder(
         "some_feeder_mrid",
-        mutator=mutator
+        mutators=[mutator]
     )
 
 The `usage_point_proportional_allocator` function creates a mutator that distributes NMI names across a percentage
@@ -69,6 +71,8 @@ be modified in this case.
 
 The `seed` parameter is used to seed the pseudorandom number generator, making the random allocations reproducible.
 
+A callback function may be provided. It will be run on the set of mRIDs of named usage points.
+
 ## Line Weakener ##
 
     from zepben.edith import line_weakener
@@ -76,11 +80,11 @@ The `seed` parameter is used to seed the pseudorandom number generator, making t
     mutator = line_weakener(
         weakening_percentage=30,
         use_weakest_when_necessary=False  # exclude to use weakest line type when necessary
-        match 
+        callback=print  # function to call on the set of mRIDs of downgraded lines (Set[str] -> Any)
     )
-    modified_acls_mrids = await client.create_synthetic_feeder(
+    await client.create_synthetic_feeder(
         "some_feeder_mrid",
-        mutator=mutator
+        mutators=[mutator]
     )
 
 The line weakener decreases the amp rating and modifies impedance of lines by selecting from a built-in catalogue of 
@@ -93,6 +97,8 @@ used. If there are no linecodes that fit the criteria and `use_weakest_when_nece
 lowest-amp-rating linecode that matches the phase and voltage criteria is used, if there is one. Otherwise, the line is
 left unmodified.
 
+A callback function may be provided. It will be run on the set of mRIDs of downgraded lines.
+
 ## Transformer Weakener ##
 
     from zepben.edith import transformer_weakener
@@ -101,10 +107,11 @@ left unmodified.
         weakening_percentage=30,
         use_weakest_when_necessary=False,  # exclude to use weakest transformer model when necessary
         match_voltages=False,  # exclude to ensure transformer models match winding voltages
+        callback=print  # function to call on the set of mRIDs of downgraded transformers (Set[str] -> Any)
     )
-    modified_tx_end_mrids = await client.create_synthetic_feeder(
+    await client.create_synthetic_feeder(
         "some_feeder_mrid",
-        mutator=mutator
+        mutators=[mutator]
     )
 
 The transformer weakener decreases the VA rating of power transformers by selecting from a built-in catalogue of
@@ -115,3 +122,5 @@ Suppose a transformer has a VA rating of 300kVA. With a weakening percentage of 
 (100 - 30)% of 300kVA, i.e. 210kVA. If the transformer is 3-phase and the winding voltages are 11kV and 433V,
 the "M_200KVA_11KV_433V_3PH_PADMOUNT_Tyree" transformer model may be used, decreasing the VA rating of the transformer
 to 200VA.
+
+A callback function may be provided. It will be run on the set of mRIDs of downgraded transformers.
