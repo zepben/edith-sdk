@@ -20,7 +20,7 @@ from zepben.protobuf.nc.nc_requests_pb2 import GetIdentifiedObjectsRequest, GetE
 from zepben.protobuf.nc.nc_responses_pb2 import GetIdentifiedObjectsResponse, GetEquipmentForContainersResponse, \
     GetNetworkHierarchyResponse
 
-from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator, line_weakener
+from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator, line_weakener, transformer_weakener
 from streaming.get.grpcio_aio_testing.mock_async_channel import async_testing_channel
 from streaming.get.mock_server import MockServer, StreamGrpc, UnaryGrpc, unary_from_fixed
 
@@ -156,6 +156,44 @@ class TestNetworkConsumer:
             [
                 UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(network_with_line))),
                 StreamGrpc('getEquipmentForContainers', [_create_container_responses(network_with_line)]),
+                StreamGrpc('getIdentifiedObjects', [object_responses])
+            ]
+        )
+
+    @pytest.mark.asyncio
+    async def test_transformer_weakener(self):
+        network_with_transformer = await (
+            TestNetworkBuilder()
+            .from_power_transformer(
+                nominal_phases=[PhaseCode.ABCN, PhaseCode.ABC],
+                end_actions=[
+                    lambda end: setattr(end, "rated_u", 11000) or setattr(end, "rated_s", 300000),
+                    lambda end: setattr(end, "rated_u", 433) or setattr(end, "rated_s", 300000)
+                ]
+            )
+            .add_feeder("tx0")
+            .build()
+        )
+
+        feeder_mrid = "fdr1"
+
+        async def client_test():
+            modified_ends = await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                transformer_weakener(30)
+            )
+            assert modified_ends == {"tx0-e1", "tx0-e2"}
+            primary_end = self.service.get("tx0-e1")
+            secondary_end = self.service.get("tx0-e2")
+            assert primary_end.rated_s == secondary_end.rated_s == 200000
+
+        object_responses = _create_object_responses(network_with_transformer)
+
+        await self.mock_server.validate(
+            client_test,
+            [
+                UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(network_with_transformer))),
+                StreamGrpc('getEquipmentForContainers', [_create_container_responses(network_with_transformer)]),
                 StreamGrpc('getIdentifiedObjects', [object_responses])
             ]
         )
