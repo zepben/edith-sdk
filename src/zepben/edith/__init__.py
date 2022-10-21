@@ -11,35 +11,17 @@ from zepben.protobuf.nc.nc_requests_pb2 import INCLUDE_ENERGIZED_LV_FEEDERS
 
 from zepben.edith.linecode_catalogue import LINECODE_CATALOGUE
 
-__all__ = ["do_nothing_mutator", "composite_mutator", "line_weakener", "transformer_weakener",
+__all__ = ["line_weakener", "transformer_weakener",
            "usage_point_proportional_allocator", "NetworkConsumerClient", "SyncNetworkConsumerClient"]
 
 from zepben.edith.transformer_catalogue import TRANSFORMER_CATALOGUE
 
 
-def do_nothing_mutator(_):
-    return set()
-
-
-def composite_mutator(mutators: Iterable[Callable[[NetworkService], Set[str]]]) -> Callable[[NetworkService], Set[str]]:
-    """
-    Creates a mutator from multiple mutators. The resulting mutator applies each mutation sequentially, and returns the
-    union of each mutator's set of modified object mRIDs.
-
-    :param mutators: An iterable of mutator functions, in the desired order of application.
-    """
-    def mutate(feeder_network):
-        changed = set()
-        for mut in mutators:
-            changed.update(mut(feeder_network))
-        return changed
-    return mutate
-
-
 def line_weakener(
         weakening_percentage: int,
-        use_weakest_when_necessary: bool = True
-) -> Callable[[NetworkService], Set[str]]:
+        use_weakest_when_necessary: bool = True,
+        callback: Optional[Callable[[Set[str]], Any]] = None
+) -> Callable[[NetworkService], None]:
     """
     Returns a mutator function that downgrades lines based on their amp rating. Both the amp rating and impedance is
     updated using an entry in the built-in catalogue of linecodes. The linecode must match the voltage category (HV/LV)
@@ -50,7 +32,9 @@ def line_weakener(
                                  rating of N should have an amp rating of at most (100 - weakening_percentage)% of N.
     :param use_weakest_when_necessary: Whether to use the linecode with the lowest amp rating if the target amp rating
                                        for a line is too low. Defaults to `True`.
-    :return: A mutator function that downgrades lines and returns the set of mRIDs of modified lines.
+    :param callback: An optional callback that acts on the set of mRIDs of modified lines.
+
+    :return: A mutator function that downgrades lines.
     """
     if not 1 <= weakening_percentage <= 100:
         raise ValueError("Weakening percentage must be between 1 and 100")
@@ -104,7 +88,8 @@ def line_weakener(
                 acls.wire_info = feeder_network.get(f"{linecode.name}-oh", OverheadWireInfo)
             lines_modified.add(acls.mrid)
 
-        return lines_modified
+        if callback is not None:
+            callback(lines_modified)
 
     return mutate
 
@@ -112,8 +97,9 @@ def line_weakener(
 def transformer_weakener(
         weakening_percentage: int,
         use_weakest_when_necessary: bool = True,
-        match_voltages: bool = True
-) -> Callable[[NetworkService], Set[str]]:
+        match_voltages: bool = True,
+        callback: Optional[Callable[[Set[str]], Any]] = None
+) -> Callable[[NetworkService], None]:
     """
     Returns a mutator function that downgrades transformers based on their VA rating. The VA rating of transformer ends
     are updated using an entry in the built-in catalogue of transformer models. The model must match the number of
@@ -128,14 +114,16 @@ def transformer_weakener(
                                        VA rating for a line is too low. Defaults to `True`.
     :param match_voltages: Whether to match the operating voltage of transformer windings when selecting a transformer
                            model. Defaults to `True`.
-    :return: A mutator function that downgrades transformers and returns the set of mRIDs of modified transformer ends.
+    :param callback: An optional callback is called on the set of mRIDs of modified transformers.
+
+    :return: A mutator function that downgrades transformers.
     """
     if not 1 <= weakening_percentage <= 100:
         raise ValueError("Weakening percentage must be between 1 and 100")
     amp_rating_ratio = (100 - weakening_percentage) / 100
 
     def mutate(feeder_network: NetworkService):
-        ends_modified = set()
+        modified_txs = set()
         for tx in feeder_network.objects(PowerTransformer):
             ends = list(tx.ends)
             if len(ends) == 0:
@@ -167,9 +155,11 @@ def transformer_weakener(
 
             for end, new_kva_rating in zip(ends, xfmr.kvas):
                 end.rated_s = new_kva_rating * 1000
-                ends_modified.add(end.mrid)
 
-        return ends_modified
+            modified_txs.add(tx.mrid)
+
+        if callback is not None:
+            callback(modified_txs)
 
     return mutate
 
@@ -178,8 +168,9 @@ def usage_point_proportional_allocator(
         proportion: int,
         edith_customers: List[str],
         allow_duplicate_customers: bool = False,
-        seed: Optional[int] = None
-) -> Callable[[NetworkService], Set[str]]:
+        seed: Optional[int] = None,
+        callback: Optional[Callable[[Set[str]], Any]] = None
+) -> Callable[[NetworkService], None]:
     """
     Creates a mutator function that distributes a `proportion` of NMIs from `edith_customers`
     to the `UsagePoint`s in the network.
@@ -189,7 +180,9 @@ def usage_point_proportional_allocator(
     :param allow_duplicate_customers: Reuse customers from the list to reach the proportion if necessary. Defaults to
                                       `False`.
     :param seed: A number to seed the random number generator with. Defaults to not seeding.
-    :return: A mutator function that distributes the `proportion` of NMIs across the `UsagePoint`s, and returns the set
+    :param callback: An optional function that is called on the set of mRIDs of `UsagePoint`s that are named.
+
+    :return: A mutator function that distributes NMIs across `proportion`% of the `UsagePoint`s, and returns the set
              of mRIDs of modified `UsagePoint`s.
     """
     if not 1 <= proportion <= 100:
@@ -200,7 +193,7 @@ def usage_point_proportional_allocator(
     else:
         nmi_generator = iter(edith_customers)
 
-    def mutate(feeder_network: NetworkService) -> Set[str]:
+    def mutate(feeder_network: NetworkService):
         random.seed(seed)
         try:
             nmi_name_type = feeder_network.get_name_type("NMI")
@@ -235,7 +228,8 @@ def usage_point_proportional_allocator(
                 continue
             break
 
-        return usage_points_named
+        if callback is not None:
+            callback(usage_points_named)
 
     return mutate
 
@@ -243,22 +237,20 @@ def usage_point_proportional_allocator(
 async def _create_synthetic_feeder(
         self: NetworkConsumerClient,
         feeder_mrid: str,
-        mutator: Callable[[NetworkService], Set[str]] = do_nothing_mutator
-) -> Set[str]:
+        mutators: Iterable[Callable[[NetworkService], None]] = ()
+):
     """
     Creates a copy of the given `feeder_mrid` and runs `mutator` to the copied network.
 
     :param feeder_mrid: The mRID of the feeder to create a synthetic version of.
-    :param mutator: The mutator to use to modify the feeder network. Default will do nothing to the feeder.
+    :param mutators: The mutator functions to use to modify the feeder network. Defaults to no mutator functions.
     :return: The mRIDs of the mutated objects in the feeder network.
     """
 
     await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
-    feeder_network = self.service
 
-    modified_object_mrids = mutator(feeder_network)
-
-    return modified_object_mrids
+    for mutator in mutators:
+        mutator(self.service)
 
 NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 
@@ -266,8 +258,8 @@ NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 def _sync_create_synthetic_feeder(
         self: SyncNetworkConsumerClient,
         feeder_mrid: str,
-        mutator: Callable[[NetworkService], Set[str]] = do_nothing_mutator
-) -> int:
+        mutators: Iterable[Callable[[NetworkService], None]] = ()
+):
     """
     Creates a copy of the given `feeder_mrid` and runs `mutator` to the copied network.
 
@@ -275,7 +267,7 @@ def _sync_create_synthetic_feeder(
     :param mutator: The mutator to use to modify the feeder network. Default will do nothing to the feeder.
     :return: The mRIDs of the mutated objects in the feeder network.
     """
-    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, mutator))
+    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, mutators))
 
 
 SyncNetworkConsumerClient.create_synthetic_feeder = _sync_create_synthetic_feeder

@@ -4,7 +4,6 @@
 - Added `line_weakener`, which creates a mutator that reduces the amp rating of lines via a catalogue of line types.
 - Added `transformer_weakener`, which creates a mutator that reduces the VA rating of transformers via a catalogue of
   transformer models.
-- Added `composite_mutator`, which combines multiple mutator functions together in sequence to form a new mutator.
 ### Breaking Changes
 - The `seed` parameter has been moved to the usage point allocator creator.
 - The `create_synthetic_feeder` method now returns the set of mRIDs of the modified network objects.
