@@ -41,11 +41,11 @@ class TestNetworkConsumer:
         feeder_mrid = "f001"
 
         async def client_test():
-            n = await self.client.create_synthetic_feeder(
+            modified_usage_points = await self.client.create_synthetic_feeder(
                 feeder_mrid,
                 usage_point_proportional_allocator(80, ["A", "B", "C"])
             )
-            assert n == 3
+            assert len(modified_usage_points) == 3
 
             added_names = list(self.service.get_name_type("NMI").names)
             assert set(n.name for n in added_names) == {"A", "B", "C"}
@@ -67,11 +67,11 @@ class TestNetworkConsumer:
         feeder_mrid = "f001"
 
         async def client_test():
-            n = await self.client.create_synthetic_feeder(
+            modified_usage_points = await self.client.create_synthetic_feeder(
                 feeder_mrid,
                 usage_point_proportional_allocator(80, ["A", "B", "C"], allow_duplicate_customers=True)
             )
-            assert n == 4
+            assert len(modified_usage_points) == 4
 
             added_names = list(self.service.get_name_type("NMI").names)
             assert set(n.name for n in added_names) == {"A", "B", "C"}
@@ -93,11 +93,11 @@ class TestNetworkConsumer:
         feeder_mrid = "fdr2"
 
         async def client_test():
-            n = await self.client.create_synthetic_feeder(
+            modified_usage_points = await self.client.create_synthetic_feeder(
                 feeder_mrid,
                 usage_point_proportional_allocator(60, ["A", "B", "C"])
             )
-            assert n == 3
+            assert len(modified_usage_points) == 3
 
             nmi_names = list(self.service.get_name_type("NMI").names)
             assert len(nmi_names) == 5

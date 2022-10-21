@@ -20,16 +20,37 @@ Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, s
         allow_duplicate_customers=True,  # exclude to prevent adding a customer to multiple usage points
         seed=1234  # exclude for non-deterministic allocation
     )
-    num_allocations = client.create_synthetic_feeder(
+    modified_object_mrids = await client.create_synthetic_feeder(
         "some_feeder_mrid",
-        mutator=allocator
+        mutator=mutator
     )
     synthetic_feeder = client.service
     # ... do stuff with synthetic feeder ...
 
 # Mutator Functions #
 
+The `create_synthetic_feeder` function fetches a feeder's network and applies a mutator function.
+    
+    mutator = ...  # see subsections for options 
+    modified_object_mrids = await client.create_synthetic_feeder(
+        "some_feeder_mrid",
+        mutator=mutator
+    )
+
+A mutator function takes a network and changes it in some way, for example increasing line impedances. Mutator functions
+return a set containing the mRIDs of modified objects.
+The Edith extension provides a few functions that create mutator functions:
+
 ## Usage Point Allocator ##
+    
+    from zepben.edith import usage_point_proportional_allocator
+
+    mutator = usage_point_proportional_allocator(
+        proportion=30,
+        edith_customers=["9995435452"],
+        allow_duplicate_customers=True,  # exclude to prevent adding a customer to multiple usage points
+        seed=1234  # exclude for non-deterministic allocation
+    )
 
 The `usage_point_proportional_allocator` function creates a mutator that distributes NMI names across a percentage
 of usage points. It will use up all provided names before reusing any. In other words, it will not reuse a name unless
@@ -42,8 +63,7 @@ a `usage_point_proportional_allocator(proportion=60, edith_customers=["A", "B", 
 allocation is for UP5 to receive name "A", UP2 to receive name "B", and UP3 to receive name "C". UP1 and UP4 would not
 be modified in this case.
 
-The `seed` parameter is used to seed the pseudorandom number generator, making the random allocations reproducible. An
-example is provided in the above "Usage" section.
+The `seed` parameter is used to seed the pseudorandom number generator, making the random allocations reproducible.
 
 ## Line Weakener ##
 
