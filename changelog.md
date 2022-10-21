@@ -7,6 +7,7 @@
 - Added `composite_mutator`, which combines multiple mutator functions together in sequence to form a new mutator.
 ### Breaking Changes
 - The `seed` parameter has been moved to the usage point allocator creator.
+- The `create_synthetic_feeder` method now returns the set of mRIDs of the modified network objects.
 
 ## [0.1.0] - 2022-10-04
 ### Initial release
