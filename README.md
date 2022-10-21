@@ -51,12 +51,16 @@ The Edith extension provides a few functions that create mutator functions:
         allow_duplicate_customers=True,  # exclude to prevent adding a customer to multiple usage points
         seed=1234  # exclude for non-deterministic allocation
     )
+    modified_usage_point_mrids = await client.create_synthetic_feeder(
+        "some_feeder_mrid",
+        mutator=mutator
+    )
 
 The `usage_point_proportional_allocator` function creates a mutator that distributes NMI names across a percentage
 of usage points. It will use up all provided names before reusing any. In other words, it will not reuse a name unless
-the number of allocations (`num_allocations`) is greater than the length of `edith_customers`. By default, it will stop
-allocating NMI names once it uses up all provided names, unless `allow_duplicate_customers` is set to `True`.
-This allocator also removes an existing NMI on each usage point it adds a NMI to, if there exists one.
+the number of modified usage points (`len(modified_usage_point_mrids)`) is greater than the length of `edith_customers`.
+By default, it will stop allocating NMI names once it uses up all provided names, unless `allow_duplicate_customers` is
+set to `True`. This allocator also removes an existing NMI on each usage point it adds a NMI to, if there exists one.
 
 Example: A synthetic feeder is created on a feeder with 5 usage points: UP1, UP2, UP3, UP4, and UP5. The allocator is
 a `usage_point_proportional_allocator(proportion=60, edith_customers=["A", "B", "C"])`. One possible result of the
@@ -73,6 +77,10 @@ The `seed` parameter is used to seed the pseudorandom number generator, making t
         weakening_percentage=30,
         use_weakest_when_necessary=False  # exclude to use weakest line type when necessary
         match 
+    )
+    modified_acls_mrids = await client.create_synthetic_feeder(
+        "some_feeder_mrid",
+        mutator=mutator
     )
 
 The line weakener decreases the amp rating and modifies impedance of lines by selecting from a built-in catalogue of 
@@ -93,6 +101,10 @@ left unmodified.
         weakening_percentage=30,
         use_weakest_when_necessary=False,  # exclude to use weakest transformer model when necessary
         match_voltages=False,  # exclude to ensure transformer models match winding voltages
+    )
+    modified_tx_end_mrids = await client.create_synthetic_feeder(
+        "some_feeder_mrid",
+        mutator=mutator
     )
 
 The transformer weakener decreases the VA rating of power transformers by selecting from a built-in catalogue of
