@@ -64,7 +64,7 @@ def line_weakener(
         for lc in LINECODE_CATALOGUE:
             feeder_network.add(CableInfo(mrid=f"{lc.name}-ug", rated_current=int(lc.norm_amps)))
             feeder_network.add(OverheadWireInfo(mrid=f"{lc.name}-oh", rated_current=int(lc.norm_amps)))
-            feeder_network.add(PerLengthSequenceImpedance(mrid=f"{lc.name} plsi", r0=lc.r0, x0=lc.x0, r=lc.r1, x=lc.x1))
+            feeder_network.add(PerLengthSequenceImpedance(mrid=f"{lc.name}-plsi", r0=lc.r0, x0=lc.x0, r=lc.r1, x=lc.x1))
 
         lines_modified = set()
         for acls in feeder_network.objects(AcLineSegment):
@@ -73,7 +73,7 @@ def line_weakener(
             except IndexError:
                 continue
 
-            if acls.wire_info is None:
+            if acls.wire_info is None or acls.wire_info.rated_current is None:
                 continue
             wire_info: WireInfo = acls.wire_info
 
@@ -97,11 +97,11 @@ def line_weakener(
             if linecode is None:
                 continue
 
-            acls.per_length_sequence_impedance = feeder_network.get(f"{linecode.name} plsi", PerLengthSequenceImpedance)
+            acls.per_length_sequence_impedance = feeder_network.get(f"{linecode.name}-plsi", PerLengthSequenceImpedance)
             if isinstance(acls.wire_info, CableInfo):
-                acls.wire_info = feeder_network.get(f"{linecode.name} underground cable", CableInfo)
+                acls.wire_info = feeder_network.get(f"{linecode.name}-ug", CableInfo)
             else:
-                acls.wire_info = feeder_network.get(f"{linecode.name} overhead line", OverheadWireInfo)
+                acls.wire_info = feeder_network.get(f"{linecode.name}-oh", OverheadWireInfo)
             lines_modified.add(acls.mrid)
 
         return lines_modified

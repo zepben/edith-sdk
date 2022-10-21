@@ -95,6 +95,7 @@ class MockServer:
                 rpc.requests_closed()
             finally:
                 rpc.terminate((), grpc.StatusCode.OK, '')
+        pass
 
     def _run_unary_server_logic(self, interaction: UnaryGrpc):
         _, request, rpc = self.channel.take_unary_unary(self.grpc_service.methods_by_name[interaction.function])
