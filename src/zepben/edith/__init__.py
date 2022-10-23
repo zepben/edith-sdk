@@ -125,7 +125,7 @@ def transformer_weakener(
     def mutate(feeder_network: NetworkService):
         modified_txs = set()
         for tx in feeder_network.objects(PowerTransformer):
-            ends = [tx.get_end_by_num(i) for i in range(1, tx.num_ends() + 1)]
+            ends = sorted(tx.ends, key=lambda e: e.end_number)
             if len(ends) == 0:
                 continue
             for end in ends:
