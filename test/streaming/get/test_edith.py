@@ -4,7 +4,7 @@
 #  License, v. 2.0. If a copy of the MPL was not distributed with this
 #  file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from typing import Optional, Iterable, Generator, Callable, Dict
+from typing import Optional, Iterable, Generator, Callable, Dict, Set
 
 import pytest
 
@@ -13,14 +13,14 @@ from zepben.evolve import NetworkService, IdentifiedObject, CableInfo, AcLineSeg
     EnergySourcePhase, Junction, PowerTransformer, PowerTransformerEnd, ConnectivityNode, Feeder, Location, \
     OverheadWireInfo, PerLengthSequenceImpedance, \
     Substation, Terminal, EquipmentContainer, TransformerStarImpedance, GeographicalRegion, \
-    SubGeographicalRegion, Circuit, Loop, LvFeeder, UsagePoint, BaseVoltage
+    SubGeographicalRegion, Circuit, Loop, LvFeeder, UsagePoint, BaseVoltage, TestNetworkBuilder, PhaseCode
 from zepben.protobuf.nc import nc_pb2
 from zepben.protobuf.nc.nc_data_pb2 import NetworkIdentifiedObject
 from zepben.protobuf.nc.nc_requests_pb2 import GetIdentifiedObjectsRequest, GetEquipmentForContainersRequest
 from zepben.protobuf.nc.nc_responses_pb2 import GetIdentifiedObjectsResponse, GetEquipmentForContainersResponse, \
     GetNetworkHierarchyResponse
 
-from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator
+from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator, line_weakener, transformer_weakener
 from streaming.get.grpcio_aio_testing.mock_async_channel import async_testing_channel
 from streaming.get.mock_server import MockServer, StreamGrpc, UnaryGrpc, unary_from_fixed
 
@@ -37,19 +37,21 @@ class TestNetworkConsumer:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("feeder_network", [5], indirect=True)
-    async def test_create_synthetic_feeder_does_not_reuse_nmis_by_default(self, feeder_network: NetworkService):
+    async def test_nmi_allocator_does_not_reuse_nmis_by_default(self, feeder_network: NetworkService):
         feeder_mrid = "f001"
 
-        async def client_test():
-            service, n = await self.client.create_synthetic_feeder(
-                feeder_mrid,
-                usage_point_proportional_allocator(80, ["A", "B", "C"])
-            )
-            assert n == 3
+        def verify_usage_points(modified_usage_points: Set[str]):
+            assert len(modified_usage_points) == 3
 
             added_names = list(self.service.get_name_type("NMI").names)
             assert set(n.name for n in added_names) == {"A", "B", "C"}
             assert len(set(n.identified_object for n in added_names)) == 3
+
+        async def client_test():
+            await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                [usage_point_proportional_allocator(80, ["A", "B", "C"], callback=verify_usage_points)]
+            )
 
         object_responses = _create_object_responses(feeder_network)
 
@@ -63,19 +65,24 @@ class TestNetworkConsumer:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("feeder_network", [5], indirect=True)
-    async def test_create_synthetic_feeder_can_reuse_nmis(self, feeder_network: NetworkService):
+    async def test_nmi_allocator_can_reuse_nmis(self, feeder_network: NetworkService):
         feeder_mrid = "f001"
 
-        async def client_test():
-            service, n = await self.client.create_synthetic_feeder(
-                feeder_mrid,
-                usage_point_proportional_allocator(80, ["A", "B", "C"], allow_duplicate_customers=True)
-            )
-            assert n == 4
+        def verify_usage_points(modified_usage_points: Set[str]):
+            assert len(modified_usage_points) == 4
 
             added_names = list(self.service.get_name_type("NMI").names)
             assert set(n.name for n in added_names) == {"A", "B", "C"}
             assert len(set(n.identified_object for n in added_names)) == 4
+
+        async def client_test():
+            await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                [
+                    usage_point_proportional_allocator(80, ["A", "B", "C"], allow_duplicate_customers=True,
+                                                       callback=verify_usage_points)
+                ]
+            )
 
         object_responses = _create_object_responses(feeder_network)
 
@@ -89,20 +96,22 @@ class TestNetworkConsumer:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("network_with_nmis", [5], indirect=True)
-    async def test_create_synthetic_feeder_replaces_existing_nmis(self, network_with_nmis: NetworkService):
+    async def test_nmi_allocator_replaces_existing_nmis(self, network_with_nmis: NetworkService):
         feeder_mrid = "fdr2"
 
-        async def client_test():
-            service, n = await self.client.create_synthetic_feeder(
-                feeder_mrid,
-                usage_point_proportional_allocator(60, ["A", "B", "C"])
-            )
-            assert n == 3
+        def verify_usage_points(modified_usage_points: Set[str]):
+            assert len(modified_usage_points) == 3
 
             nmi_names = list(self.service.get_name_type("NMI").names)
             assert len(nmi_names) == 5
             assert {"A", "B", "C"} <= set(n.name for n in nmi_names)
             assert len(set(n.identified_object for n in nmi_names)) == 5
+
+        async def client_test():
+            await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                [usage_point_proportional_allocator(60, ["A", "B", "C"], callback=verify_usage_points)]
+            )
 
         object_responses = _create_object_responses(network_with_nmis)
 
@@ -112,7 +121,94 @@ class TestNetworkConsumer:
                 UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(network_with_nmis))),
                 StreamGrpc('getEquipmentForContainers', [_create_container_responses(network_with_nmis)]),
                 StreamGrpc('getIdentifiedObjects', [object_responses, object_responses])
-            ])
+            ]
+        )
+
+    @pytest.mark.asyncio
+    async def test_line_weakener(self):
+        cable_info = CableInfo(mrid="cable-500A", rated_current=500)
+        base_voltage = BaseVoltage(mrid="hv-bv", nominal_voltage=11000)
+        network_with_line = await (
+            TestNetworkBuilder()
+            .from_acls(
+                nominal_phases=PhaseCode.BCN,
+                action=lambda acls: setattr(acls, "wire_info", cable_info) or
+                                    setattr(acls, "base_voltage", base_voltage)
+            )
+            .add_feeder("c0")
+            .build()
+        )
+        network_with_line.add(cable_info)
+        network_with_line.add(base_voltage)
+
+        feeder_mrid = "fdr1"
+
+        def verify_lines(modified_lines: Set[str]):
+            assert modified_lines == {"c0"}
+            acls = self.service.get("c0", AcLineSegment)
+            assert acls.wire_info.mrid == "Neptune_19/3.25_AAC/1350_2W-ug"
+            assert acls.wire_info.rated_current == 333
+            assert acls.per_length_sequence_impedance.mrid == "Neptune_19/3.25_AAC/1350_2W-plsi"
+            assert acls.per_length_sequence_impedance.r == 0.0001825
+            assert acls.per_length_sequence_impedance.x == 0.0003616
+            assert acls.per_length_sequence_impedance.r0 == 0.0002825
+            assert acls.per_length_sequence_impedance.x0 == 0.0011364
+
+        async def client_test():
+            await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                [line_weakener(30, callback=verify_lines)]
+            )
+
+        object_responses = _create_object_responses(network_with_line)
+
+        await self.mock_server.validate(
+            client_test,
+            [
+                UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(network_with_line))),
+                StreamGrpc('getEquipmentForContainers', [_create_container_responses(network_with_line)]),
+                StreamGrpc('getIdentifiedObjects', [object_responses])
+            ]
+        )
+
+    @pytest.mark.asyncio
+    async def test_transformer_weakener(self):
+        network_with_tx = await (
+            TestNetworkBuilder()
+            .from_power_transformer(
+                nominal_phases=[PhaseCode.ABCN, PhaseCode.ABC],
+                end_actions=[
+                    lambda end: setattr(end, "rated_u", 11000) or setattr(end, "rated_s", 300000),
+                    lambda end: setattr(end, "rated_u", 433) or setattr(end, "rated_s", 300000)
+                ]
+            )
+            .add_feeder("tx0")
+            .build()
+        )
+
+        feeder_mrid = "fdr1"
+
+        def verify_transformers(modified_txs: Set[str]):
+            assert modified_txs == {"tx0"}
+            primary_end, secondary_end = self.service.get("tx0", PowerTransformer).ends
+            assert primary_end.rated_s == secondary_end.rated_s == 200000
+
+        async def client_test():
+            await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                [transformer_weakener(30, callback=verify_transformers)]
+            )
+
+        object_responses = _create_object_responses(network_with_tx)
+
+        await self.mock_server.validate(
+            client_test,
+            [
+                UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(network_with_tx))),
+                StreamGrpc('getEquipmentForContainers', [_create_container_responses(network_with_tx)]),
+                StreamGrpc('getIdentifiedObjects', [object_responses])
+            ]
+        )
 
 
 # noinspection PyUnresolvedReferences

@@ -9,7 +9,7 @@ import sys
 from setuptools import setup, find_namespace_packages
 
 deps = [
-    "zepben.evolve==0.33.0b5",
+    "zepben.evolve==0.34.0",
     "dataclassy==0.6.2",
 ]
 
