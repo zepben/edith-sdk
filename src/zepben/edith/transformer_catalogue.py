@@ -15,7 +15,7 @@ class XfmrCode:
     phases: int
     windings: int
     kvas: List[int]
-    kvs: List[int]
+    kvs: List[float]
     xhl: float
     load_loss: float
     conns: List[str]
