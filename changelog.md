@@ -15,7 +15,7 @@
 ### Notes
 * None.
 
-## [0.2.0] - UNRELEASED
+## [0.2.0] - 2022-10-25
 ### New Features
 - Added `line_weakener`, which creates a mutator that reduces the amp rating of lines via a catalogue of line types.
 - Added `transformer_weakener`, which creates a mutator that reduces the VA rating of transformers via a catalogue of
