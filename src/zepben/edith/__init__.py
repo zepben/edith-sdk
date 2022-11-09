@@ -247,7 +247,7 @@ async def _create_synthetic_feeder(
     :return: The mRIDs of the mutated objects in the feeder network.
     """
 
-    await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)
+    (await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)).throw_on_error()
 
     for mutator in mutators:
         mutator(self.service)
