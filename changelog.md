@@ -1,5 +1,5 @@
 # Zepben Powerfactory Exporter changelog
-## [0.2.1] - UNRELEASED
+## [0.2.1] - 2022-11-09
 ### Fixes
 * `create_synthetic_feeder` will now throw an exception if the gRPC call failed.
 
