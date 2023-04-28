@@ -10,10 +10,11 @@ and apply certain scenarios to them to modify the network.
 Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, so to use simply do the following:
 
     from zepben.evolve import connect_with_password
-    from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator
+    from zepben.edith import NetworkConsumerClient, CustomerConsumerClient usage_point_proportional_allocator
     
     channel = connect_with_password(client_id="some_client_id", username="test", password="secret", host="host", port=443)
     client = NetworkConsumerClient(channel)
+    customer_client = CustomerConsumerClient(channel)
     mutator = usage_point_proportional_allocator(
         proportion=30,
         edith_customers=["9995435452"],
@@ -24,6 +25,7 @@ Functionality is implemented on the NetworkConsumerClient from the Evolve SDK, s
     await client.create_synthetic_feeder(
         "some_feeder_mrid",
         mutators=[mutator],
+        customer_client
     )
     synthetic_feeder = client.service
     # ... do stuff with synthetic feeder ...
@@ -36,26 +38,35 @@ The `create_synthetic_feeder` function fetches a feeder's network and applies a 
     await client.create_synthetic_feeder(
         "some_feeder_mrid",
         mutators=[mutator]
+        customer_client
     )
 
 A mutator function takes a network and changes it in some way, for example increasing line impedances. Mutator functions
 return a set containing the mRIDs of modified objects.
+Some mutator functions can also take a CustomerService, which requires passing a CustomerConsumerClient to `create_synthetic_feeder()`, which will retrieve
+customers for the requested feeder.
+
 The Edith extension provides a few functions that create mutator functions:
 
 ## Usage Point Allocator ##
     
-    from zepben.edith import usage_point_proportional_allocator
+    from zepben.edith import NetworkConsumerClient, CustomerConsumerClient usage_point_proportional_allocator
+
+    channel = connect_with_password(client_id="some_client_id", username="test", password="secret", host="host", port=443)
+    client = NetworkConsumerClient(channel)
+    customer_client = CustomerConsumerClient(channel)
     
     mutator = usage_point_proportional_allocator(
         proportion=30,
         edith_customers=["9995435452"],
         allow_duplicate_customers=True,  # exclude to prevent adding a customer to multiple usage points
-        seed=1234  # exclude for non-deterministic allocation
-        callback=print  # function to call on set of mrids of named usage points (Set[str] -> Any)
+        seed=1234,  # exclude for non-deterministic allocation
+        callback=lambda ups: print(f"Number of Edith usage points applied: {len(ups)}")  # function to call on set of mrids of named usage points (Set[str] -> Any)
     )
     await client.create_synthetic_feeder(
         "some_feeder_mrid",
-        mutators=[mutator]
+        mutators=[mutator],
+        customer_client
     )
 
 The `usage_point_proportional_allocator` function creates a mutator that distributes NMI names across a percentage
@@ -64,7 +75,10 @@ the number of modified usage points (`len(modified_usage_point_mrids)`) is great
 By default, it will stop allocating NMI names once it uses up all provided names, unless `allow_duplicate_customers` is
 set to `True`. This allocator also removes an existing NMI on each usage point it adds a NMI to, if there exists one.
 
-Example: A synthetic feeder is created on a feeder with 5 usage points: UP1, UP2, UP3, UP4, and UP5. The allocator is
+If a `CustomerConsumerClient` was provided to `create_synthetic_feeder`, this function will take into account the `Customer`s `kind`
+when distributing NMI's, and only `Customer`s with a `kind` of `residential`, `UNKNOWN`, `other`, and `residentialFarmService` will be considered.
+
+Example: A synthetic feeder is created on a feeder with 5 `residential` usage points: UP1, UP2, UP3, UP4, and UP5. The allocator is
 a `usage_point_proportional_allocator(proportion=60, edith_customers=["A", "B", "C"])`. One possible result of the
 allocation is for UP5 to receive name "A", UP2 to receive name "B", and UP3 to receive name "C". UP1 and UP4 would not
 be modified in this case.
@@ -76,11 +90,13 @@ A callback function may be provided. It will be run on the set of mRIDs of named
 ## Line Weakener ##
 
     from zepben.edith import line_weakener
+    channel = connect_with_password(client_id="some_client_id", username="test", password="secret", host="host", port=443)
+    client = NetworkConsumerClient(channel)
 
     mutator = line_weakener(
         weakening_percentage=30,
-        use_weakest_when_necessary=False  # exclude to use weakest line type when necessary
-        callback=print  # function to call on the set of mRIDs of downgraded lines (Set[str] -> Any)
+        use_weakest_when_necessary=False,  # exclude to use weakest line type when necessary
+        callback=lambda lines: print(f"Number of lines weakened: {len(lines)}")  # function to call on the set of mRIDs of downgraded lines (Set[str] -> Any)
     )
     await client.create_synthetic_feeder(
         "some_feeder_mrid",
@@ -102,12 +118,14 @@ A callback function may be provided. It will be run on the set of mRIDs of downg
 ## Transformer Weakener ##
 
     from zepben.edith import transformer_weakener
+    channel = connect_with_password(client_id="some_client_id", username="test", password="secret", host="host", port=443)
+    client = NetworkConsumerClient(channel)
 
     mutator = transformer_weakener(
         weakening_percentage=30,
         use_weakest_when_necessary=False,  # exclude to use weakest transformer model when necessary
         match_voltages=False,  # exclude to ensure transformer models match winding voltages
-        callback=print  # function to call on the set of mRIDs of downgraded transformers (Set[str] -> Any)
+        callback=lambda transformers: print(f"Number of transformers weakened: {len(transformers)}")  # function to call on the set of mRIDs of downgraded transformers (Set[str] -> Any)
     )
     await client.create_synthetic_feeder(
         "some_feeder_mrid",

@@ -18,10 +18,10 @@ from zepben.edith.transformer_catalogue import TRANSFORMER_CATALOGUE
 
 
 def line_weakener(
-        weakening_percentage: int,
-        use_weakest_when_necessary: bool = True,
-        callback: Optional[Callable[[Set[str]], Any]] = None
-) -> Callable[[NetworkService], None]:
+    weakening_percentage: int,
+    use_weakest_when_necessary: bool = True,
+    callback: Optional[Callable[[Set[str]], Any]] = None
+) -> Callable[[str, NetworkService, CustomerService], None]:
     """
     Returns a mutator function that downgrades lines based on their amp rating. Both the amp rating and impedance is
     updated using an entry in the built-in catalogue of linecodes. The linecode must match the voltage category (HV/LV)
@@ -43,7 +43,7 @@ def line_weakener(
     hv_linecodes = [lc for lc in LINECODE_CATALOGUE if lc.hv]
     lv_linecodes = [lc for lc in LINECODE_CATALOGUE if not lc.hv]
 
-    def mutate(feeder_network: NetworkService):
+    def mutate(feeder_mrid: str, feeder_network: NetworkService, customer_service: Optional[CustomerService] = None):
         # Add wire info and plsi for each linecode
         for lc in LINECODE_CATALOGUE:
             feeder_network.add(CableInfo(mrid=f"{lc.name}-ug", rated_current=int(lc.norm_amps)))
@@ -95,11 +95,11 @@ def line_weakener(
 
 
 def transformer_weakener(
-        weakening_percentage: int,
-        use_weakest_when_necessary: bool = True,
-        match_voltages: bool = True,
-        callback: Optional[Callable[[Set[str]], Any]] = None
-) -> Callable[[NetworkService], None]:
+    weakening_percentage: int,
+    use_weakest_when_necessary: bool = True,
+    match_voltages: bool = True,
+    callback: Optional[Callable[[Set[str]], Any]] = None
+) -> Callable[[str, NetworkService, CustomerService], None]:
     """
     Returns a mutator function that downgrades transformers based on their VA rating. The VA rating of transformer ends
     are updated using an entry in the built-in catalogue of transformer models. The model must match the number of
@@ -122,7 +122,7 @@ def transformer_weakener(
         raise ValueError("Weakening percentage must be between 1 and 100")
     amp_rating_ratio = (100 - weakening_percentage) / 100
 
-    def mutate(feeder_network: NetworkService):
+    def mutate(feeder_mrid: str, feeder_network: NetworkService, customer_service: Optional[CustomerService] = None):
         modified_txs = set()
         for tx in feeder_network.objects(PowerTransformer):
             ends = list(tx.ends)
@@ -139,7 +139,7 @@ def transformer_weakener(
             num_cores = ends[0].terminal.phases.without_neutral.num_phases
             correct_cores_xfmrs = filter(lambda xfmr: xfmr.phases == num_cores, correct_num_windings)
             if match_voltages:
-                end_voltages = [end.rated_u/1000 for end in ends]
+                end_voltages = [end.rated_u / 1000 for end in ends]
                 good_voltage_xfmrs = [xfmr for xfmr in correct_cores_xfmrs if xfmr.kvs == end_voltages]
             else:
                 good_voltage_xfmrs = list(correct_cores_xfmrs)
@@ -165,12 +165,12 @@ def transformer_weakener(
 
 
 def usage_point_proportional_allocator(
-        proportion: int,
-        edith_customers: List[str],
-        allow_duplicate_customers: bool = False,
-        seed: Optional[int] = None,
-        callback: Optional[Callable[[Set[str]], Any]] = None
-) -> Callable[[NetworkService], None]:
+    proportion: int,
+    edith_customers: List[str],
+    allow_duplicate_customers: bool = False,
+    seed: Optional[int] = None,
+    callback: Optional[Callable[[Set[str]], Any]] = None
+) -> Callable[[str, NetworkService, CustomerService], None]:
     """
     Creates a mutator function that distributes a `proportion` of NMIs from `edith_customers`
     to the `UsagePoint`s in the network.
@@ -193,7 +193,7 @@ def usage_point_proportional_allocator(
     else:
         nmi_generator = iter(edith_customers)
 
-    def mutate(feeder_network: NetworkService):
+    def mutate(feeder_mrid: str, feeder_network: NetworkService, customer_service: Optional[CustomerService] = None):
         random.seed(seed)
         try:
             nmi_name_type = feeder_network.get_name_type("NMI")
@@ -204,9 +204,17 @@ def usage_point_proportional_allocator(
 
         usage_points_named = set()
         for lv_feeder in feeder_network.objects(LvFeeder):
-            usage_points = []
+            usage_points = set()
             for eq in lv_feeder.equipment:
-                usage_points.extend(eq.usage_points)
+                for up in eq.usage_points:
+                    for ed in up.end_devices:
+                        if customer_service is not None:
+                            customer = customer_service.get(ed.customer_mrid, Customer, None)
+                            if customer is not None and customer.kind in (CustomerKind.residential, CustomerKind.UNKNOWN, CustomerKind.other, CustomerKind.residentialFarmService):
+                                usage_points.add(up)
+                        else:
+                            usage_points.add(up)
+            usage_points = list(usage_points)  # check this works
             usage_points.sort(key=lambda up: up.mrid)
 
             usage_points_to_name = random.sample(usage_points, int(len(usage_points) * proportion / 100))
@@ -235,30 +243,41 @@ def usage_point_proportional_allocator(
 
 
 async def _create_synthetic_feeder(
-        self: NetworkConsumerClient,
-        feeder_mrid: str,
-        mutators: Iterable[Callable[[NetworkService], None]] = ()
+    self: NetworkConsumerClient,
+    feeder_mrid: str,
+    mutators: Iterable[Callable[[str, NetworkService, Optional[CustomerService]], None]] = (),
+    customer_consumer_client: CustomerConsumerClient = None
 ):
     """
     Creates a copy of the given `feeder_mrid` and runs `mutator` to the copied network.
 
     :param feeder_mrid: The mRID of the feeder to create a synthetic version of.
     :param mutators: The mutator functions to use to modify the feeder network. Defaults to no mutator functions.
+    :param customer_consumer_client: The `CustomerConsumerClient` to retrieve customers for the given `feeder_mrid`.
     :return: The mRIDs of the mutated objects in the feeder network.
     """
 
-    (await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)).throw_on_error()
+    result = (await self.get_equipment_container(feeder_mrid, Feeder, include_energized_containers=INCLUDE_ENERGIZED_LV_FEEDERS)).throw_on_error()
+
+    customer_service = None
+    if customer_consumer_client is not None:
+        (await customer_consumer_client.get_customers_for_container(feeder_mrid)).throw_on_error()
+        for lv_feeder in self.service.objects(LvFeeder):
+            (await customer_consumer_client.get_customers_for_container(lv_feeder.mrid)).throw_on_error()
+        customer_service = customer_consumer_client.service
 
     for mutator in mutators:
-        mutator(self.service)
+        mutator(feeder_mrid, self.service, customer_service)
 
 NetworkConsumerClient.create_synthetic_feeder = _create_synthetic_feeder
 
 
 def _sync_create_synthetic_feeder(
-        self: SyncNetworkConsumerClient,
-        feeder_mrid: str,
-        mutators: Iterable[Callable[[NetworkService], None]] = ()
+    self: SyncNetworkConsumerClient,
+    feeder_mrid: str,
+    mutators: Iterable[Callable[[str, NetworkService, Optional[CustomerService]], None]] = (),
+    customer_consumer_client: CustomerConsumerClient = None
+
 ):
     """
     Creates a copy of the given `feeder_mrid` and runs `mutator` to the copied network.
@@ -267,7 +286,7 @@ def _sync_create_synthetic_feeder(
     :param mutator: The mutator to use to modify the feeder network. Default will do nothing to the feeder.
     :return: The mRIDs of the mutated objects in the feeder network.
     """
-    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, mutators))
+    return get_event_loop().run_until_complete(_create_synthetic_feeder(self, feeder_mrid, mutators, customer_consumer_client))
 
 
 SyncNetworkConsumerClient.create_synthetic_feeder = _sync_create_synthetic_feeder
