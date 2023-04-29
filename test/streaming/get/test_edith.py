@@ -4,7 +4,7 @@
 #  License, v. 2.0. If a copy of the MPL was not distributed with this
 #  file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from typing import Optional, Iterable, Generator, Callable, Dict, Set
+from typing import Optional, Iterable, Generator, Callable, Dict, Set, Tuple
 
 import pytest
 
@@ -13,13 +13,16 @@ from zepben.evolve import NetworkService, IdentifiedObject, CableInfo, AcLineSeg
     EnergySourcePhase, Junction, PowerTransformer, PowerTransformerEnd, ConnectivityNode, Feeder, Location, \
     OverheadWireInfo, PerLengthSequenceImpedance, \
     Substation, Terminal, EquipmentContainer, TransformerStarImpedance, GeographicalRegion, \
-    SubGeographicalRegion, Circuit, Loop, LvFeeder, UsagePoint, BaseVoltage, TestNetworkBuilder, PhaseCode
+    SubGeographicalRegion, Circuit, Loop, LvFeeder, UsagePoint, BaseVoltage, TestNetworkBuilder, PhaseCode, CustomerService, CustomerConsumerClient
+from zepben.protobuf.cc import cc_pb2
 from zepben.protobuf.nc import nc_pb2
 from zepben.protobuf.nc.nc_data_pb2 import NetworkIdentifiedObject
 from zepben.protobuf.nc.nc_requests_pb2 import GetIdentifiedObjectsRequest, GetEquipmentForContainersRequest
 from zepben.protobuf.nc.nc_responses_pb2 import GetIdentifiedObjectsResponse, GetEquipmentForContainersResponse, \
     GetNetworkHierarchyResponse
-
+from zepben.protobuf.cc.cc_data_pb2 import CustomerIdentifiedObject
+from zepben.protobuf.cc.cc_requests_pb2 import GetCustomersForContainerRequest
+from zepben.protobuf.cc.cc_responses_pb2 import GetCustomersForContainerResponse
 from zepben.edith import NetworkConsumerClient, usage_point_proportional_allocator, line_weakener, transformer_weakener
 from streaming.get.grpcio_aio_testing.mock_async_channel import async_testing_channel
 from streaming.get.mock_server import MockServer, StreamGrpc, UnaryGrpc, unary_from_fixed
@@ -29,10 +32,12 @@ class TestNetworkConsumer:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        self.channel = async_testing_channel(nc_pb2.DESCRIPTOR.services_by_name.values(),
+        self.channel = async_testing_channel(cc_pb2.DESCRIPTOR.services_by_name.values(),
                                              grpc_testing.strict_real_time())
-        self.mock_server = MockServer(self.channel, nc_pb2.DESCRIPTOR.services_by_name['NetworkConsumer'])
+        self.mock_server = MockServer(self.channel, [nc_pb2.DESCRIPTOR.services_by_name['NetworkConsumer'], cc_pb2.DESCRIPTOR.services_by_name['CustomerConsumer']])
         self.client = NetworkConsumerClient(channel=self.channel)
+        self.customer_client = CustomerConsumerClient(channel=self.channel)
+        self.customer_service = self.customer_client.service
         self.service = self.client.service
 
     @pytest.mark.asyncio
@@ -96,7 +101,41 @@ class TestNetworkConsumer:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("network_with_nmis", [5], indirect=True)
-    async def test_nmi_allocator_replaces_existing_nmis(self, network_with_nmis: NetworkService):
+    async def test_nmi_allocator_replaces_existing_nmis(self, network_with_nmis: Tuple[NetworkService, CustomerService]):
+        feeder_mrid = "fdr2"
+        network_service, customer_service = network_with_nmis
+
+        def verify_usage_points(modified_usage_points: Set[str]):
+            assert len(modified_usage_points) == 3
+
+            nmi_names = list(self.service.get_name_type("NMI").names)
+            assert len(nmi_names) == 5
+            assert {"A", "B", "C"} <= set(n.name for n in nmi_names)
+            assert len(set(n.identified_object for n in nmi_names)) == 5
+
+        async def client_test():
+            await self.client.create_synthetic_feeder(
+                feeder_mrid,
+                [usage_point_proportional_allocator(60, ["A", "B", "C"], callback=verify_usage_points)],
+                self.customer_client
+            )
+
+        object_responses = _create_object_responses(network_service)
+        customer_object_responses = _create_customer_responses(network_service, customer_service)
+
+        await self.mock_server.validate(
+            client_test,
+            [
+                UnaryGrpc('getNetworkHierarchy', unary_from_fixed(None, _create_hierarchy_response(network_service))),
+                StreamGrpc('getEquipmentForContainers', [_create_container_responses(network_service)]),
+                StreamGrpc('getIdentifiedObjects', [object_responses, object_responses]),
+                StreamGrpc('getCustomersForContainer', [customer_object_responses, customer_object_responses])
+            ]
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("network_with_nmis", [5], indirect=True)
+    async def test_nmi_allocator_skips_non_residential_custumers(self, network_with_nmis: NetworkService, customer_service: CustomerService):
         feeder_mrid = "fdr2"
 
         def verify_usage_points(modified_usage_points: Set[str]):
@@ -262,8 +301,29 @@ def _to_network_identified_object(obj) -> NetworkIdentifiedObject:
     return nio
 
 
+# noinspection PyUnresolvedReferences
+def _to_customer_identified_object(obj) -> CustomerIdentifiedObject:
+    if isinstance(obj, Customer):
+        cio = CustomerIdentifiedObject(customer=obj.to_pb())
+    elif isinstance(obj, CustomerAgreement):
+        cio = CustomerIdentifiedObject(customerAgreement=obj.to_pb())
+    elif isinstance(obj, Organisation):
+        cio = CustomerIdentifiedObject(organisation=obj.to_pb())
+    elif isinstance(obj, PricingStructure):
+        cio = CustomerIdentifiedObject(pricingStructure=obj.to_pb())
+    elif isinstance(obj, Tariff):
+        cio = CustomerIdentifiedObject(tariff=obj.to_pb())
+    else:
+        raise Exception(f"Missing class in create response - you should implement it: {str(obj)}")
+    return cio
+
+
 def _response_of(io: IdentifiedObject, response_type):
     return response_type(identifiedObjects=[_to_network_identified_object(io)])
+
+
+def _customer_response_of(io: IdentifiedObject, response_type):
+    return response_type(identifiedObjects=[_to_customer_identified_object(io)])
 
 
 def _create_object_responses(ns: NetworkService, mrids: Optional[Iterable[str]] = None) \
@@ -275,6 +335,25 @@ def _create_object_responses(ns: NetworkService, mrids: Optional[Iterable[str]] 
             obj = valid[mrid]
             if obj:
                 yield _response_of(obj, GetIdentifiedObjectsResponse)
+            else:
+                raise AssertionError(f"Requested unexpected object {mrid}.")
+
+    return responses
+
+
+def _create_customer_responses(ns: NetworkService, cs: CustomerService) -> \
+        Callable[[GetCustomersForContainerRequest], Generator[GetCustomersForContainerResponse, None, None]]:
+
+    def responses(request: GetCustomersForContainerRequest) -> Generator[GetCustomersForContainerResponse, None, None]:
+        for mrid in request.mrids:
+            container = ns[mrid]
+            if container:
+                for eq in container.equipment:
+                    for up in eq.usage_points:
+                        for ed in up.end_devices:
+                            if ed.customer_mrid:
+                                customer = cs.get(ed.customer_mrid)
+                                yield _customer_response_of(customer, GetCustomersForContainerResponse)
             else:
                 raise AssertionError(f"Requested unexpected object {mrid}.")
 
@@ -297,8 +376,7 @@ def _create_container_responses(ns: NetworkService, mrids: Optional[Iterable[str
         -> Callable[[GetEquipmentForContainersRequest], Generator[GetEquipmentForContainersResponse, None, None]]:
     valid: Dict[str, EquipmentContainer] = {mrid: ns[mrid] for mrid in mrids} if mrids else ns
 
-    def responses(request: GetEquipmentForContainersRequest) -> \
-            Generator[GetEquipmentForContainersResponse, None, None]:
+    def responses(request: GetEquipmentForContainersRequest) -> Generator[GetEquipmentForContainersResponse, None, None]:
         for mrid in request.mrids:
             container = valid[mrid]
             if container:

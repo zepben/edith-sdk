@@ -10,7 +10,7 @@ from typing import Awaitable, Callable, List, TypeVar, Union, Optional, Iterable
 import grpc
 import grpc_testing
 # noinspection PyPackageRequirements
-from google.protobuf.descriptor import ServiceDescriptor
+from google.protobuf.descriptor import ServiceDescriptor, MethodDescriptor
 
 from streaming.get.catching_thread import CatchingThread
 
@@ -55,9 +55,16 @@ def unary_from_fixed(expected_request: Optional[str], response: GrpcResponse):
 
 class MockServer:
 
-    def __init__(self, channel: grpc_testing.Channel, grpc_service: ServiceDescriptor):
+    def __init__(self, channel: grpc_testing.Channel, grpc_service: Iterable[ServiceDescriptor]):
         self.channel: grpc_testing.Channel = channel
-        self.grpc_service: ServiceDescriptor = grpc_service
+        self.grpc_service: Iterable[ServiceDescriptor] = grpc_service
+
+    def get_descriptor(self, rpc_name: str) -> MethodDescriptor:
+        for sd in self.grpc_service:
+            if rpc_name in sd.methods_by_name:
+                return sd.methods_by_name[rpc_name]
+        else:
+            raise ValueError(f"RPC {rpc_name} did not exist in any ServiceDescriptor, did you pass all ServiceDescriptors needed?")
 
     async def validate(self, client_test: Callable[[], Awaitable[None]], interactions: List[Union[StreamGrpc, UnaryGrpc]]):
         server = CatchingThread(target=self._run_server_logic, args=[interactions])
@@ -80,7 +87,8 @@ class MockServer:
 
     def _run_stream_server_logic(self, interaction: StreamGrpc):
         for processor in interaction.processors:
-            _, rpc = self.channel.take_stream_stream(self.grpc_service.methods_by_name[interaction.function])
+            s = self.get_descriptor(interaction.function)
+            _, rpc = self.channel.take_stream_stream(s)
             rpc.send_initial_metadata(())
 
             try:
@@ -98,7 +106,8 @@ class MockServer:
         pass
 
     def _run_unary_server_logic(self, interaction: UnaryGrpc):
-        _, request, rpc = self.channel.take_unary_unary(self.grpc_service.methods_by_name[interaction.function])
+        s = self.get_descriptor(interaction.function)
+        _, request, rpc = self.channel.take_unary_unary(s)
         rpc.send_initial_metadata(())
         if interaction.force_timeout:
             rpc.terminate(None, (), grpc.StatusCode.DEADLINE_EXCEEDED, '')

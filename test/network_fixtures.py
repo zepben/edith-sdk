@@ -6,7 +6,7 @@
 from typing import Dict, List, Optional
 
 from pytest import fixture
-from zepben.evolve import AssignToLvFeeders, LvFeeder, BaseVoltage, NameType, TestNetworkBuilder
+from zepben.evolve import AssignToLvFeeders, LvFeeder, BaseVoltage, NameType, TestNetworkBuilder, Customer, CustomerKind
 
 from zepben.edith import NetworkService, Feeder, PhaseCode, EnergySource, EnergySourcePhase, Junction, ConductingEquipment, Breaker, PowerTransformer, \
     UsagePoint, Terminal, PowerTransformerEnd, Meter, AssetOwner, CustomerService, Organisation, AcLineSegment, \
@@ -357,6 +357,7 @@ async def network_with_nmis(request):
         .add_lv_feeder("tx1")
         .build()
     )
+
     network_service.add(hv)
     network_service.add(lv)
     fdr = network_service.get("fdr2", Feeder)
@@ -368,12 +369,25 @@ async def network_with_nmis(request):
     nmi_name_type = NameType(name="NMI")
     network_service.add_name_type(nmi_name_type)
 
+    customer_service = CustomerService()
+
     tx = network_service.get("tx1", PowerTransformer)
     for i in range(num_usagepoints):
         usage_point = UsagePoint(mrid=f"up{i}")
         usage_point.add_name(nmi_name_type.get_or_add_name(f"NMI{i}", usage_point))
+
+        customer = Customer(mrid=f"customer{i}")
+        customer.kind = CustomerKind.residential
+        customer_service.add(customer)
+
+        meter = Meter(mrid=f"meter{i}")
+        usage_point.add_end_device(meter)
+        meter.add_usage_point(usage_point)
+        meter.customer_mrid = customer.mrid
+        network_service.add(meter)
+
         tx.add_usage_point(usage_point)
         usage_point.add_equipment(tx)
         network_service.add(usage_point)
 
-    return network_service
+    return network_service, customer_service
