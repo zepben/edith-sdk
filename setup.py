@@ -9,7 +9,7 @@ import sys
 from setuptools import setup, find_namespace_packages
 
 deps = [
-    "zepben.evolve==0.35.0b19",
+    "zepben.evolve==0.36.0",
     "dataclassy==0.6.2",
 ]
 
@@ -23,7 +23,7 @@ test_deps = [
     "pytest-cov==2.10.1",
     "pytest-asyncio==0.19.0",
     "pytest-timeout==1.4.2",
-    "grpcio-testing==1.46.3",
+    "grpcio-testing==1.57.0",
     "pylint==2.14.5"
 ]
 
@@ -40,15 +40,13 @@ setup(
     classifiers=[
         "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Operating System :: OS Independent"
     ],
     package_dir={"": "src"},
     packages=find_namespace_packages(where="src"),
-    python_requires='>=3.7',
+    python_requires='>=3.9',
     install_requires=deps,
     extras_require={
         "test": test_deps,
