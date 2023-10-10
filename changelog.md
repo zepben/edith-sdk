@@ -1,4 +1,20 @@
 # Zepben Powerfactory Exporter changelog
+## [0.4.0] - UNRELEASED
+### Breaking Changes
+* None.
+
+### New Features
+* None.
+
+### Enhancements
+* None.
+
+### Fixes
+* None.
+
+### Notes
+* None.
+
 ## [0.3.0] - 2023-10-10
 ### Breaking Changes
 * None.
