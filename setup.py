@@ -29,7 +29,7 @@ test_deps = [
 
 setup(
     name="zepben.edith",
-    version="0.4.0",
+    version="0.5.0b1",
     description="Python SDK extensions for the Edith project",
     long_description="Extension functions for interacting with the EWB",
     long_description_content_type="text/markdown",
