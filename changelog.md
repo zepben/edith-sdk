@@ -1,5 +1,5 @@
 # Zepben Powerfactory Exporter changelog
-## [0.4.0] - UNRELEASED
+## [0.4.0] - 2024-03-07
 ### Breaking Changes
 * None.
 
