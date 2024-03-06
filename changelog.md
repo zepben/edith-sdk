@@ -4,7 +4,7 @@
 * None.
 
 ### New Features
-* None.
+* Update to latest evolve SDK (0.37.1)
 
 ### Enhancements
 * None.
